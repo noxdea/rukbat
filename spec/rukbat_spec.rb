@@ -256,6 +256,25 @@ RSpec.describe Rukbat::Workbook do
     expect(workbook[1, 2]).to eq("left")
   end
 
+  it "adjusts formulas inside and outside a sheet during column edits" do
+    workbook.add_sheet("Budget")
+    workbook.set(1, 3, 8, sheet: "Budget")
+    workbook.set(1, 5, "=C1", sheet: "Budget")
+    workbook.set(1, 2, "=Budget!C1", sheet: "Sheet1")
+
+    workbook.insert_columns(2, sheet: "Budget")
+
+    expect(workbook.formula(1, 6, sheet: "Budget")).to eq("=D1")
+    expect(workbook[1, 6, sheet: "Budget"]).to eq(8)
+    expect(workbook.formula(1, 2, sheet: "Sheet1")).to eq("=Budget!D1")
+    expect(workbook[1, 2, sheet: "Sheet1"]).to eq(8)
+
+    workbook.delete_columns(4, sheet: "Budget")
+
+    expect(workbook.formula(1, 5, sheet: "Budget")).to eq("=#REF!")
+    expect(workbook.formula(1, 2, sheet: "Sheet1")).to eq("=#REF!")
+  end
+
   it "undoes and redoes edits using persistent sheet snapshots" do
     workbook.set(1, 1, 3)
     workbook.set(1, 1, 8)
