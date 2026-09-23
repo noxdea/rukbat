@@ -47,7 +47,7 @@ module Rukbat
         file.flush
         file.fsync
         file.chmod(mode)
-        File.rename(file.path, target)
+        AtomicFile.install(file.path, target, replace: true)
       end
       path
     rescue SystemCallError => error
