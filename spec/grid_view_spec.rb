@@ -122,4 +122,24 @@ RSpec.describe Rukbat::GridView do
     expect(view.__send__(:edit_structure, :delete_columns)).to be(true)
     expect([workbook.input_at(1, 1), workbook.input_at(1, 2)]).to eq(["A", "D"])
   end
+
+  it "sets a print area from the selection and exports it from the current workbook" do
+    workbook = Rukbat::Workbook.from_rows([["outside", "outside"], ["outside", "inside"]])
+    view = described_class.new(workbook)
+    view.grid.selection = [area(2...3, 2...3)]
+    expect(view.__send__(:set_print_area)).to be(true)
+    expect(workbook.print_area).to eq(Furud::Area.new(sheet: "Sheet1", top: 2, left: 2, bottom: 2, right: 2))
+
+    font = File.join(Gem::Specification.find_by_name("zaniah").full_gem_path, "assets/fonts/Abel-Regular.ttf")
+    Tempfile.create(["rukbat-export", ".pdf"]) do |file|
+      window = double("window")
+      allow(window).to receive(:request_frame)
+      allow(window).to receive(:prompt_for_paths).and_return([font], [file.path])
+      view.instance_variable_set(:@cx, double(window: window))
+
+      expect(view.__send__(:export_pdf)).to be(true)
+      expect(File.binread(file.path)).to start_with("%PDF-1.7\n".b)
+      expect(view.status).to include("Exported")
+    end
+  end
 end

@@ -141,6 +141,44 @@ RSpec.describe Rukbat::Workbook do
     expect(workbook.hidden_rows).to be_empty
   end
 
+  it "keeps per-sheet print areas through edits, undo, redo, and clearing" do
+    workbook.set(5, 3, "end")
+    workbook.set_print_area(2, 2, 5, 3)
+    expect(workbook.print_area).to eq(Furud::Area.new(sheet: "Sheet1", top: 2, left: 2, bottom: 5, right: 3))
+
+    workbook.insert_rows(3)
+    expect(workbook.print_area.bottom).to eq(6)
+    expect(workbook.undo).to be(true)
+    expect(workbook.print_area.bottom).to eq(5)
+    expect(workbook.redo).to be(true)
+    expect(workbook.print_area.bottom).to eq(6)
+    workbook.insert_columns(2)
+    expect([workbook.print_area.left, workbook.print_area.right]).to eq([3, 4])
+    expect(workbook.undo).to be(true)
+    expect([workbook.print_area.left, workbook.print_area.right]).to eq([2, 3])
+    expect(workbook.redo).to be(true)
+    expect([workbook.print_area.left, workbook.print_area.right]).to eq([3, 4])
+
+    workbook.add_sheet("Notes")
+    workbook.set_print_area(1, 1, 1, 1, sheet: "Notes")
+    expect(workbook.print_area(sheet: "Sheet1").bottom).to eq(6)
+    workbook.remove_sheet("Notes")
+    expect(workbook.print_area(sheet: "Sheet1").bottom).to eq(6)
+
+    workbook.clear_print_area
+    expect(workbook.print_area).to be_nil
+    expect(workbook.undo).to be(true)
+    expect(workbook.print_area.bottom).to eq(6)
+  end
+
+  it "drops a print area deleted in full and validates its coordinates" do
+    workbook.set_print_area(2, 1, 3, 1)
+    workbook.delete_rows(2, 2)
+
+    expect(workbook.print_area).to be_nil
+    expect { workbook.set_print_area(0, 1, 1, 1) }.to raise_error(Rukbat::Error, /range coordinates/)
+  end
+
   it "summarizes a selected rectangle from Denebola" do
     workbook.set(1, 1, 10)
     workbook.set(2, 1, 20)

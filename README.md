@@ -66,8 +66,13 @@ count, numeric count, sum, and average appear in the status bar.
 
 The toolbar provides common number, font, alignment, fill, and border formats;
 sorting, filtering, duplicate removal, search/replace, comments, named ranges,
-positive-value highlighting, freeze panes, and line/bar/pie charts. Export a
-PDF with `bundle exec rukbat --export-pdf report.pdf --font /path/to/font.ttf`.
+positive-value highlighting, freeze panes, print areas, and line/bar/pie charts.
+Select a range and choose **Set print area** to constrain PDF export; **Clear
+print area** restores full-sheet output. **Export PDF** prompts for an embeddable
+font and output path, applying the current print area. The CLI can also export
+with `bundle exec rukbat --export-pdf report.pdf --font /path/to/font.ttf`.
+Print areas are session metadata; CSV has no place to store them, so they reset
+when the workbook is reopened.
 PDF export embeds the supplied font and writes cell values and basic cell
 styling; it does not yet render charts.
 

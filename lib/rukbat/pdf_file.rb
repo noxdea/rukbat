@@ -18,13 +18,16 @@ module Rukbat
     def render(workbook, font:, sheet: workbook.active_sheet)
       font = normalize_font(font)
       current = workbook.sheet(sheet)
-      rows, columns = [current.row_count, 1].max, [current.column_count, 1].max
+      area = workbook.print_area(sheet: sheet)
+      origin_row, origin_column = area ? [area.top - 1, area.left - 1] : [0, 0]
+      rows = area ? area.bottom - area.top + 1 : [current.row_count, 1].max
+      columns = area ? area.right - area.left + 1 : [current.column_count, 1].max
       raise Error, "PDF export exceeds #{MAX_CELLS} cells" if rows * columns > MAX_CELLS
 
       document = Okab::Document.new(title: "#{sheet} — Rukbat", author: "Yudai Takada", creator: "Rukbat")
       (0...rows).step(ROWS_PER_PAGE) do |row_offset|
         (0...columns).step(COLUMNS_PER_PAGE) do |column_offset|
-          render_page(document, workbook, font, sheet, row_offset, column_offset,
+          render_page(document, workbook, font, sheet, origin_row, origin_column, row_offset, column_offset,
             [rows - row_offset, ROWS_PER_PAGE].min, [columns - column_offset, COLUMNS_PER_PAGE].min)
         end
       end
@@ -50,9 +53,11 @@ module Rukbat
       raise Error, "cannot write PDF: #{error.message}"
     end
 
-    def render_page(document, workbook, font, sheet, row_offset, column_offset, row_count, column_count)
+    def render_page(document, workbook, font, sheet, origin_row, origin_column, row_offset, column_offset, row_count, column_count)
       document.page(width: PAGE_WIDTH, height: PAGE_HEIGHT) do |page|
-        page.text("#{sheet} — rows #{row_offset + 1}-#{row_offset + row_count}",
+        first_row = origin_row + row_offset + 1
+        last_row = first_row + row_count - 1
+        page.text("#{sheet} — rows #{first_row}-#{last_row}",
           x: MARGIN, y: PAGE_HEIGHT - MARGIN, font: font, size: 10)
         data_top = PAGE_HEIGHT - MARGIN - 24
         (0..row_count).each do |row_index|
@@ -60,7 +65,8 @@ module Rukbat
             x = MARGIN + (column_index.zero? ? 0 : 38 + (column_index - 1) * CELL_WIDTH)
             width = column_index.zero? ? 38 : CELL_WIDTH
             y = data_top - row_index * CELL_HEIGHT
-            text, style = cell_text(workbook, sheet, row_offset, column_offset, row_index, column_index)
+            text, style = cell_text(workbook, sheet, origin_row, origin_column,
+              row_offset, column_offset, row_index, column_index)
             paint_cell(page, text, style, font, x, y, width)
           end
         end
@@ -68,12 +74,13 @@ module Rukbat
     end
     private_class_method :render_page
 
-    def cell_text(workbook, sheet, row_offset, column_offset, row_index, column_index)
+    def cell_text(workbook, sheet, origin_row, origin_column, row_offset, column_offset, row_index, column_index)
       return ["", {}] if row_index.zero? && column_index.zero?
-      return [(row_offset + row_index).to_s, {}] if column_index.zero?
-      return [Furud::Formula.column_name(column_offset + column_index), {}] if row_index.zero?
+      return [(origin_row + row_offset + row_index).to_s, {}] if column_index.zero?
+      return [Furud::Formula.column_name(origin_column + column_offset + column_index), {}] if row_index.zero?
 
-      row, column = row_offset + row_index, column_offset + column_index
+      row = origin_row + row_offset + row_index
+      column = origin_column + column_offset + column_index
       workbook.presentation_at(row, column, sheet: sheet)
     end
     private_class_method :cell_text

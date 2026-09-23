@@ -64,6 +64,9 @@ module Rukbat
     def hidden_rows: (?sheet: String) -> Array[Integer]
     def hidden_columns: (?sheet: String) -> Array[Integer]
     def clear_hidden: (:rows | :columns axis, ?sheet: String) -> self
+    def set_print_area: (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> Furud::Area
+    def clear_print_area: (?sheet: String) -> self
+    def print_area: (?sheet: String) -> Furud::Area?
     def insert_rows: (Integer at, ?Integer count, ?sheet: String) -> self
     def delete_rows: (Integer at, ?Integer count, ?sheet: String) -> self
     def insert_columns: (Integer at, ?Integer count, ?sheet: String) -> self

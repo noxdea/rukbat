@@ -39,6 +39,28 @@ RSpec.describe Rukbat::PDFFile do
     expect(pdf).to include("/Count 4".b)
   end
 
+  it "exports only the selected print area with original row and column labels" do
+    workbook = Rukbat::Workbook.from_rows([
+      ["outside top", "hidden"],
+      ["outside left", "inside", "outside right"],
+      ["outside bottom", "also inside"]
+    ])
+    workbook.set_print_area(2, 2, 3, 2)
+    pdf = described_class.render(workbook, font: font_path)
+
+    expect(pdf).to include("/Count 1".b)
+    skip "pdftotext is unavailable" unless system("pdftotext", "-v", out: File::NULL, err: File::NULL)
+
+    Tempfile.create(["rukbat-print-area", ".pdf"]) do |file|
+      file.binmode
+      file.write(pdf)
+      file.flush
+      extracted = IO.popen(["pdftotext", file.path, "-"], &:read)
+      expect(extracted).to include("rows 2-3", "inside", "also inside", "B")
+      expect(extracted).not_to include("outside top", "outside left", "outside right", "outside bottom", "hidden")
+    end
+  end
+
   it "rejects invalid cell text instead of emitting a broken PDF" do
     workbook = Rukbat::Workbook.new
     workbook.set(1, 1, "\xFF".b)

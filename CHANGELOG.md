@@ -9,4 +9,5 @@
 - Refuse stale-file and unexpected-file overwrites when saving CSV/TSV.
 - Add undoable formatting, sorting, filtering, duplicate removal, and find/replace.
 - Add comments, named ranges, conditional formatting, hidden axes, and freeze panes.
+- Add undoable per-sheet print areas and export the selected range to PDF.
 - Add line, bar, and pie charts plus paginated, searchable PDF export.

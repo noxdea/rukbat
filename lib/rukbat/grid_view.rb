@@ -50,6 +50,9 @@ module Rukbat
       @delete_rows_button = UI::Button.new("Delete rows", size: :sm, variant: :ghost).on_click { edit_structure(:delete_rows) }
       @insert_column_button = UI::Button.new("Insert col", size: :sm, variant: :ghost).on_click { edit_structure(:insert_columns) }
       @delete_columns_button = UI::Button.new("Delete cols", size: :sm, variant: :ghost).on_click { edit_structure(:delete_columns) }
+      @set_print_area_button = UI::Button.new("Set print area", size: :sm, variant: :ghost).on_click { set_print_area }
+      @clear_print_area_button = UI::Button.new("Clear print area", size: :sm, variant: :ghost).on_click { clear_print_area }
+      @export_pdf_button = UI::Button.new("Export PDF", size: :sm, variant: :ghost).on_click { export_pdf }
       @find_field = UI::TextField.new("")
       @replace_field = UI::TextField.new("")
       @find_button = UI::Button.new("Find", size: :sm, variant: :ghost).on_click { find_selection }
@@ -91,6 +94,7 @@ module Rukbat
       structure_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
         .child(@insert_row_button).child(@delete_rows_button)
         .child(@insert_column_button).child(@delete_columns_button)
+        .child(@set_print_area_button).child(@clear_print_area_button).child(@export_pdf_button)
       annotation_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
         .child(@highlight_button).child(@comment_field.style(width: 150)).child(@comment_button)
         .child(@name_field.style(width: 120)).child(@name_button)
@@ -351,6 +355,49 @@ module Rukbat
       request_frame
       true
     rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def set_print_area
+      top, left, bottom, right = selected_coordinates
+      @workbook.set_print_area(top, left, bottom, right)
+      @status = "Print area set to #{cell_address(top, left)}:#{cell_address(bottom, right)}"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def clear_print_area
+      @workbook.clear_print_area
+      @status = "Print area cleared"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def export_pdf
+      window = @cx&.window
+      raise Rukbat::Error, "PDF export requires an interactive window" unless window&.respond_to?(:prompt_for_paths)
+
+      font = window.prompt_for_paths.first
+      return false unless font
+      path = window.prompt_for_paths(save: true).first
+      return false unless path
+      path = "#{path}.pdf" if File.extname(path).empty?
+
+      PDFFile.write(@workbook, path, font: font)
+      @status = "Exported #{File.basename(path)}"
+      request_frame
+      true
+    rescue Rukbat::Error, ArgumentError => error
       @status = error.message
       request_frame
       false

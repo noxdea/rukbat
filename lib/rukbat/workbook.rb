@@ -39,6 +39,7 @@ module Rukbat
       @conditional_formats = [].freeze
       @hidden_rows = {}.freeze
       @hidden_columns = {}.freeze
+      @print_areas = {}.freeze
       @source = CellSource.new(self)
       @engine = Furud::Engine.new(@source)
       @source_path = nil
@@ -81,6 +82,7 @@ module Rukbat
       @conditional_formats = @conditional_formats.reject { |rule| rule[:area].sheet == name }.freeze
       @hidden_rows = @hidden_rows.reject { |sheet_name, _| sheet_name == name }.freeze
       @hidden_columns = @hidden_columns.reject { |sheet_name, _| sheet_name == name }.freeze
+      @print_areas = @print_areas.reject { |sheet_name, _| sheet_name == name }.freeze
       @active_sheet = @sheets.keys.first if @active_sheet == name
       rebuild_engine
       self
@@ -486,6 +488,33 @@ module Rukbat
       raise Error, "hidden axis must be rows or columns"
     end
 
+    def set_print_area(top, left, bottom, right, sheet: @active_sheet)
+      top, left, bottom, right, name = range_coordinates(top, left, bottom, right, sheet)
+      area = Furud::Area.new(sheet: name, top: top, left: left, bottom: bottom, right: right)
+      return area if @print_areas[name] == area
+
+      record_history
+      @print_areas = @print_areas.merge(name => area).freeze
+      area
+    end
+
+    def clear_print_area(sheet: @active_sheet)
+      name = sheet.to_s
+      raise Error, "unknown sheet: #{name}" unless @sheets.key?(name)
+      return self unless @print_areas.key?(name)
+
+      record_history
+      @print_areas = @print_areas.reject { |sheet_name, _| sheet_name == name }.freeze
+      self
+    end
+
+    def print_area(sheet: @active_sheet)
+      name = sheet.to_s
+      raise Error, "unknown sheet: #{name}" unless @sheets.key?(name)
+
+      @print_areas[name]
+    end
+
     def insert_rows(at, count = 1, sheet: @active_sheet)
       structural_edit(:insert_rows, at, count, sheet)
     end
@@ -614,10 +643,10 @@ module Rukbat
     end
 
     def snapshot = [@sheets.dup, @active_sheet, @names.dup, @formats.dup, @comments.dup,
-      @conditional_formats.dup, @hidden_rows.dup, @hidden_columns.dup]
+      @conditional_formats.dup, @hidden_rows.dup, @hidden_columns.dup, @print_areas.dup]
 
     def restore(state)
-      @sheets, @active_sheet, @names, @formats, @comments, @conditional_formats, @hidden_rows, @hidden_columns = state
+      @sheets, @active_sheet, @names, @formats, @comments, @conditional_formats, @hidden_rows, @hidden_columns, @print_areas = state
       rebuild_engine
     end
 
@@ -717,6 +746,11 @@ module Rukbat
         next unless area.sheet == name
         type.to_s.end_with?("rows") ? area.bottom : area.right
       end.max || 0
+      print_extent = @print_areas.values.filter_map do |area|
+        next unless area.sheet == name
+        type.to_s.end_with?("rows") ? area.bottom : area.right
+      end.max || 0
+      area_extent = [area_extent, print_extent].max
       hidden_extent = (type.to_s.end_with?("rows") ? @hidden_rows : @hidden_columns)
         .fetch(name, Set.new).max || 0
       occupied_extent = [occupied_extent, metadata_extent, area_extent, hidden_extent].max
@@ -802,6 +836,10 @@ module Rukbat
         area = adjusted_area(rule[:area], operation)
         area && rule.merge(area: area).freeze
       end.freeze
+      @print_areas = @print_areas.filter_map do |sheet_name, area|
+        adjusted = sheet_name == sheet ? adjusted_area(area, operation) : area
+        [sheet_name, adjusted] if adjusted
+      end.to_h.freeze
       @names.each { |name, area| @engine.define_name(name, area) }
     end
 
