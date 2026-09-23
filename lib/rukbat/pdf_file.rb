@@ -47,6 +47,7 @@ module Rukbat
         file.flush
         file.fsync
         file.chmod(mode)
+        file.close
         AtomicFile.install(file.path, target, replace: true)
       end
       path
