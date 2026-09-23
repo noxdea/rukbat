@@ -7,9 +7,9 @@ Furud formula engine.
 The current implementation includes a virtualized million-row grid, formula
 editing and completion, multi-sheet formulas, range summaries, undo/redo,
 structural row/column edits, formatting, sorting, filtering, duplicate removal,
-find/replace, comments, named ranges, conditional formatting, line/bar/pie
-charts, CSV/TSV import/export, and searchable PDF export. The application is
-still under development and has not been released as `0.1.0`. On arm64 macOS
+find/replace, comments, named ranges, conditional formatting, line/bar/pie,
+donut/scatter/area/stacked charts, CSV/TSV import/export, and searchable PDF
+export. On arm64 macOS
 with Ruby 4.0.6, the million-row integrated scroll benchmark measured 11.383 ms
 against a 16.67 ms budget, and the 100,000-cell edit/recalculation benchmark
 measured 1.773 s against a 3 s budget. Formula compatibility, public CI, and
@@ -69,7 +69,8 @@ count, numeric count, sum, and average appear in the status bar.
 
 The toolbar provides common number, font, alignment, fill, and border formats;
 sorting, filtering, duplicate removal, search/replace, comments, named ranges,
-positive-value highlighting, freeze/unfreeze panes, print areas, and line/bar/pie charts.
+positive-value highlighting, freeze/unfreeze panes, print areas, and line, bar,
+pie, donut, scatter, area, stacked-area, and stacked-bar charts.
 Freeze panes are kept per sheet and restored by undo/redo; the selected cell and
 the row/column headers before it stay visible while scrolling. **Unfreeze** removes
 all frozen rows and columns. Clear highlights removes conditional formatting

@@ -155,6 +155,19 @@ RSpec.describe Rukbat::GridView do
       expect(view.__send__(:show_chart, :line)).to be(true)
       window.tick
       expect(view.status).to eq("Line chart")
+
+      charts = {
+        bar: Zaniah::UI::BarChart, pie: Zaniah::UI::PieChart, donut: Zaniah::UI::DonutChart,
+        scatter: Zaniah::UI::ScatterChart, area: Zaniah::UI::AreaChart, stacked_area: Zaniah::UI::AreaChart,
+        stacked_bar: Zaniah::UI::StackedBarChart
+      }
+      charts.each do |type, chart_class|
+        expect(view.__send__(:show_chart, type)).to be(true), type.to_s
+        chart = view.instance_variable_get(:@chart_component)
+        expect(chart).to be_a(chart_class), type.to_s
+        expect(chart.points).to eq("Cost" => [[0.25, 0.1], [0.5, 0.2]]) if type == :scatter
+      end
+      expect(view.status).to eq("Stacked bar chart")
     ensure
       window.close
       app.executor.shutdown

@@ -37,9 +37,8 @@ module Rukbat
       @freeze_button = UI::Button.new("Freeze", size: :sm, variant: :ghost).on_click { freeze_panes }
       @unfreeze_button = UI::Button.new("Unfreeze", size: :sm, variant: :ghost).on_click { unfreeze_panes }
       @clear_conditional_button = UI::Button.new("Clear highlights", size: :sm, variant: :ghost).on_click { clear_highlights }
-      @line_chart_button = UI::Button.new("Line", size: :sm, variant: :ghost).on_click { show_chart(:line) }
-      @bar_chart_button = UI::Button.new("Bar", size: :sm, variant: :ghost).on_click { show_chart(:bar) }
-      @pie_chart_button = UI::Button.new("Pie", size: :sm, variant: :ghost).on_click { show_chart(:pie) }
+      @chart_dropdown = UI::Dropdown.new("Chart", items: %w[Line Bar Pie Donut Scatter Area Stacked\ area Stacked\ bar])
+        .on_change { |name, *_| show_chart(name.downcase.tr(" ", "_").to_sym) }
       @font_down_button = UI::Button.new("A−", size: :sm, variant: :ghost).on_click { change_font_size(-1) }
       @font_up_button = UI::Button.new("A+", size: :sm, variant: :ghost).on_click { change_font_size(1) }
       @align_button = UI::Button.new("Align", size: :sm, variant: :ghost).on_click { cycle_alignment }
@@ -118,7 +117,7 @@ module Rukbat
         .child(@undo_button).child(@redo_button).child(@save_button).child(@add_sheet_button)
         .child(@number_button).child(@percent_button).child(@bold_button).child(@fill_button)
         .child(@freeze_button).child(@unfreeze_button).child(@clear_conditional_button)
-        .child(@line_chart_button).child(@bar_chart_button).child(@pie_chart_button)
+        .child(@chart_dropdown)
       format_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
         .child(@font_down_button).child(@font_up_button).child(@align_button)
         .child(@text_color_button).child(@border_button)
@@ -750,14 +749,19 @@ module Rukbat
         request_frame
         return false
       end
-      series = chart_series(top, left, bottom, right)
+      series = chart_series(top, left, bottom, right) unless type == :scatter
       @chart_component = case type
       when :line then UI::LineChart.new(series, width: 480, height: 180)
       when :bar then UI::BarChart.new(series, width: 480, height: 180)
       when :pie then UI::PieChart.new(pie_values(top, left, bottom, right), width: 320, height: 180)
+      when :donut then UI::DonutChart.new(pie_values(top, left, bottom, right), width: 320, height: 180)
+      when :scatter then UI::ScatterChart.new(scatter_series(top, left, bottom, right), width: 480, height: 180)
+      when :area then UI::AreaChart.new(series, width: 480, height: 180)
+      when :stacked_area then UI::AreaChart.new(series, width: 480, height: 180, stacked: true)
+      when :stacked_bar then UI::StackedBarChart.new(series, width: 480, height: 180)
       else raise ArgumentError, "unsupported chart type"
       end
-      @status = "#{type.to_s.capitalize} chart"
+      @status = "#{type.to_s.tr("_", " ").capitalize} chart"
       request_frame
       true
     rescue ArgumentError, Rukbat::Error => error
@@ -782,14 +786,35 @@ module Rukbat
       columns.to_h do |column|
         name = @workbook.input_at(top, column).to_s
         name = "Series #{column_name(column)}" if name.empty?
-        values = ((top + 1)..bottom).map do |row|
-          value = @workbook[row, column]
-          value.nil? ? 0 : Float(value)
-        rescue ArgumentError, TypeError
-          0
-        end
+        values = ((top + 1)..bottom).map { |row| chart_value(row, column) }
         [name, values]
       end
+    end
+
+    def scatter_series(top, left, bottom, right)
+      columns = (left..right).to_a
+      first_column_is_labels = ((top + 1)..bottom).none? do |row|
+        Float(@workbook[row, left])
+        true
+      rescue ArgumentError, TypeError
+        false
+      end
+      columns.shift if first_column_is_labels
+      raise ArgumentError, "select X and at least one Y column for a scatter chart" if columns.length < 2
+
+      x_values = ((top + 1)..bottom).map { |row| chart_value(row, columns.first) }
+      columns.drop(1).to_h do |column|
+        name = @workbook.input_at(top, column).to_s
+        name = "Series #{column_name(column)}" if name.empty?
+        [name, ((top + 1)..bottom).map { |row| [x_values[row - top - 1], chart_value(row, column)] }]
+      end
+    end
+
+    def chart_value(row, column)
+      value = @workbook[row, column]
+      value.nil? ? 0 : Float(value)
+    rescue ArgumentError, TypeError
+      0
     end
 
     def pie_values(top, left, bottom, right)
