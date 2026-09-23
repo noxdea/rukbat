@@ -5,9 +5,10 @@ require "rspec/core/rake_task"
 
 RSpec::Core::RakeTask.new(:spec)
 
-desc "Benchmark 100k-cell workbook load and incremental recalculation"
+desc "Benchmark workbook recalculation and the integrated grid frame"
 task :bench do
   ruby "-Ilib", "bench/workbook.rb"
+  ruby "--yjit", "-Ilib", "bench/grid_view.rb"
 end
 
 task default: :spec

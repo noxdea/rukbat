@@ -12,6 +12,7 @@ module Rukbat
       super()
       @workbook, @on_save = workbook, on_save
       @active_cell, @status = [1, 1], "Ready"
+      @rendered_cells = {}
       @formula_field = UI::TextField.new("")
       @formula_field.on_change { |text, cx| update_completion(text); cx.window.request_frame }
       @function_index = Spica::Index.new(Furud::Functions.standard.names)
@@ -68,11 +69,15 @@ module Rukbat
       @filter_hidden_rows = []
       @applied_hidden_rows = []
       @applied_hidden_columns = []
+      @change_observer = @workbook.on_cells_changed do |sheet, cells|
+        invalidate_rendered_cells(sheet, cells)
+        request_frame if sheet.nil? || sheet == @workbook.active_sheet
+      end
       frozen_rows, frozen_columns = @workbook.frozen_panes
       @grid = UI::Grid.new(rows: Workbook::MAX_ROWS + 1, columns: Workbook::MAX_COLUMNS + 1,
         row_height: 24, column_width: ->(index) { index.zero? ? 52 : 112 },
-        frozen_rows: frozen_rows, frozen_columns: frozen_columns) do |row, column, _bounds, _cx|
-        render_cell(row, column)
+        frozen_rows: frozen_rows, frozen_columns: frozen_columns) do |row, column, bounds, _cx|
+        render_cell(row, column, bounds)
       end
       @grid.on_select { |areas, _event, cx| selection_changed(areas, cx) }
       @grid.on_edit { |row, column, _event, cx| begin_edit(row, column, cx) }
@@ -81,8 +86,23 @@ module Rukbat
       sync_formula_field
     end
 
+    def request_layout(cx)
+      @rendered_cells_used = {}
+      super
+    ensure
+      if @rendered_cells_used
+        @rendered_cells.delete_if { |key, _cell| !@rendered_cells_used.key?(key) }
+        @rendered_cells_used = nil
+      end
+    end
+
     def build(cx)
       @cx = cx
+      render_context = [cx.theme, cx.text_system]
+      if @render_context != render_context
+        @rendered_cells.clear
+        @render_context = render_context
+      end
       toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
         .child(@undo_button).child(@redo_button).child(@save_button).child(@add_sheet_button)
         .child(@number_button).child(@percent_button).child(@bold_button).child(@fill_button)
@@ -445,11 +465,32 @@ module Rukbat
 
     private
 
-    def render_cell(row, column)
-      return UI::Label.new(column.zero? ? "" : column_name(column), size: :sm, wrap: :none) if row.zero?
-      return UI::Label.new(row.to_s, size: :sm, wrap: :none) if column.zero?
+    def render_cell(row, column, bounds)
+      key = [@workbook.active_sheet, row, column, bounds.height]
+      @rendered_cells_used[key] = true if @rendered_cells_used
+      return @rendered_cells[key] if @rendered_cells.key?(key)
 
+      content = if row.zero?
+        UI::Label.new(column.zero? ? "" : column_name(column), size: :sm, wrap: :none)
+      elsif column.zero?
+        UI::Label.new(row.to_s, size: :sm, wrap: :none)
+      else
+        render_data_cell(row, column, bounds)
+      end
+      @rendered_cells[key] = content
+    rescue Rukbat::Error
+      @rendered_cells[key] = UI::Label.new("", size: :sm)
+    end
+
+    def render_data_cell(row, column, bounds)
       text, style = @workbook.presentation_at(row, column)
+      comment = @workbook.comment_at(row, column)
+      if style.empty? && comment.nil?
+        line_height = 12 * 1.4
+        return Zaniah::Text.new(text, size: 12, color: @cx.theme.colors.text, wrap: :none)
+          .style(margin_top: [(bounds.height - line_height) / 2, 0].max)
+      end
+
       font = if style[:font_family] || style[:bold] || style[:italic]
         @cx.text_system&.font_db&.find(family: style[:font_family],
           weight: style[:bold] ? 700 : 400, style: style[:italic] ? :italic : :normal)
@@ -462,11 +503,25 @@ module Rukbat
         .style(align_items: vertical, background: style[:background] || "#0000",
           border: style[:border_width] || 0, border_color: style[:border_color])
         .child(content)
-      comment = @workbook.comment_at(row, column)
       cell.tooltip(comment) if comment
       cell
-    rescue Rukbat::Error
-      UI::Label.new("", size: :sm)
+    end
+
+    def invalidate_rendered_cells(sheet, cells)
+      if cells.nil?
+        @rendered_cells.delete_if { |key, _cell| sheet.nil? || key[0] == sheet }
+        return
+      end
+
+      if cells.is_a?(Workbook::CellRange)
+        @rendered_cells.delete_if do |key, _cell|
+          key[0] == sheet && cells.include?(key[1], key[2])
+        end
+        return
+      end
+
+      changed = cells.to_h { |row, column| [[sheet, row, column], true] }
+      @rendered_cells.delete_if { |key, _cell| changed.key?(key.first(3)) }
     end
 
     def selection_changed(areas, cx)

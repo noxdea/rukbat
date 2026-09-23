@@ -17,6 +17,11 @@ module Rukbat
       magenta: "#FF00FF", red: "#FF0000", white: "#FFFFFF", yellow: "#FFFF00"}.freeze
 
     Summary = Data.define(:count, :numeric_count, :sum, :min, :max, :average, :types)
+    CellRange = Data.define(:top, :left, :bottom, :right) do
+      def include?(row, column)
+        row.between?(top, bottom) && column.between?(left, right)
+      end
+    end
 
     attr_reader :active_sheet
 
@@ -41,6 +46,7 @@ module Rukbat
       @hidden_columns = {}.freeze
       @frozen_panes = {name => {rows: 1, columns: 1}.freeze}.freeze
       @print_areas = {}.freeze
+      @change_observers = []
       @source = CellSource.new(self)
       @engine = Furud::Engine.new(@source)
       @source_path = nil
@@ -48,6 +54,17 @@ module Rukbat
     end
 
     def sheet_names = @sheets.keys.freeze
+
+    def on_cells_changed(&observer)
+      raise ArgumentError, "a change observer is required" unless observer
+
+      @change_observers << observer
+      observer
+    end
+
+    def remove_cells_changed_observer(observer)
+      @change_observers.delete(observer)
+    end
 
     def sheet(name = @active_sheet)
       @sheets.fetch(name.to_s) { raise Error, "unknown sheet: #{name}" }
@@ -68,6 +85,7 @@ module Rukbat
       @frozen_panes = @frozen_panes.merge(name => {rows: 1, columns: 1}.freeze).freeze
       rebuild_engine
       @active_sheet = name
+      notify_cells_changed(nil)
     end
 
     def remove_sheet(name)
@@ -88,6 +106,7 @@ module Rukbat
       @print_areas = @print_areas.reject { |sheet_name, _| sheet_name == name }.freeze
       @active_sheet = @sheets.keys.first if @active_sheet == name
       rebuild_engine
+      notify_cells_changed(nil)
       self
     end
 
@@ -119,6 +138,7 @@ module Rukbat
       @engine.set(ref, value)
       @sheets[ref.sheet] = updated
       update_calculated(@engine.recalculate)
+      notify_cells_changed(ref.sheet, [[ref.row, ref.column].freeze])
       self
     end
 
@@ -153,6 +173,9 @@ module Rukbat
       end
       @sheets[ref.sheet] = updated
       update_calculated(@engine.recalculate)
+      notify_cells_changed(ref.sheet, changes_to_apply.map do |_change, cell, _value|
+        [cell.row, cell.column].freeze
+      end)
       self
     end
 
@@ -164,6 +187,7 @@ module Rukbat
       @sheets[ref.sheet] = @sheets.fetch(ref.sheet).delete(row - 1, column - 1)
       @engine.clear(ref)
       update_calculated(@engine.recalculate)
+      notify_cells_changed(ref.sheet, [[ref.row, ref.column].freeze])
       self
     end
 
@@ -294,6 +318,7 @@ module Rukbat
       record_history unless data_changed
       set_many(changes, sheet: name) if data_changed
       @formats, @comments = formats, comments
+      notify_cells_changed(name)
       self
     rescue ArgumentError, TypeError
       raise Error, "sort column must be an integer"
@@ -333,6 +358,7 @@ module Rukbat
       end
       sync_formula_inputs
       update_calculated(@engine.recalculate)
+      notify_cells_changed(name)
       duplicates.length
     end
 
@@ -382,6 +408,7 @@ module Rukbat
 
       record_history
       @formats = updated.freeze
+      notify_cells_changed(name, CellRange.new(top: top, left: left, bottom: bottom, right: right))
       self
     end
 
@@ -413,6 +440,7 @@ module Rukbat
 
       record_history
       @comments = updated.freeze
+      notify_cells_changed(ref.sheet, [[ref.row, ref.column].freeze])
       self
     end
 
@@ -435,6 +463,7 @@ module Rukbat
 
       record_history
       @conditional_formats = (@conditional_formats + [rule]).freeze
+      notify_cells_changed(name)
       self
     end
 
@@ -446,6 +475,7 @@ module Rukbat
 
       record_history
       @conditional_formats = updated.freeze
+      notify_cells_changed(name)
       self
     end
 
@@ -569,6 +599,7 @@ module Rukbat
 
       @redo << snapshot
       restore(@history.pop)
+      notify_cells_changed(nil)
       true
     end
 
@@ -577,6 +608,7 @@ module Rukbat
 
       @history << snapshot
       restore(@redo.pop)
+      notify_cells_changed(nil)
       true
     end
 
@@ -645,6 +677,7 @@ module Rukbat
       adjust_metadata(type, at, count, name)
       sync_formula_inputs
       update_calculated(@engine.recalculate)
+      notify_cells_changed(name)
       self
     rescue ArgumentError, TypeError
       raise Error, "index and count must be integers"
@@ -729,7 +762,12 @@ module Rukbat
           [ref.row - 1, ref.column - 1, value]
         end
         @calculated[name] = update_sheet(current, edits)
+        notify_cells_changed(name, refs.map { |ref| [ref.row, ref.column].freeze })
       end
+    end
+
+    def notify_cells_changed(sheet, cells = nil)
+      @change_observers.dup.each { |observer| observer.call(sheet, cells) }
     end
 
     def update_sheet(current, changes)

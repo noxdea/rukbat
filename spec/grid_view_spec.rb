@@ -39,6 +39,47 @@ RSpec.describe Rukbat::GridView do
     expect(workbook.input_at(1, 2)).to be_nil
   end
 
+  it "rerenders only cells whose calculated values changed" do
+    workbook = Rukbat::Workbook.from_rows([["before", "=A1", "unchanged"]])
+    view = described_class.new(workbook)
+    window = Zaniah::Platform::Headless::Window.new(width: 800, height: 600)
+    context = Zaniah::FrameContext.new(window)
+    calls = []
+    allow(workbook).to receive(:presentation_at).and_wrap_original do |original, row, column, **options|
+      calls << [row, column]
+      original.call(row, column, **options)
+    end
+
+    view.request_layout(context)
+    calls.clear
+    workbook.set(1, 1, "after")
+    view.request_layout(context)
+
+    expect(calls).to contain_exactly([1, 1], [1, 2])
+    expect(view.__send__(:render_cell, 1, 1, Zaniah::Bounds.new(0, 0, 112, 24)).text).to eq("after")
+    expect(view.__send__(:render_cell, 1, 2, Zaniah::Bounds.new(112, 0, 112, 24)).text).to eq("after")
+
+    calls.clear
+    workbook.format_range(1, 1, 1, 1, bold: true)
+    view.request_layout(context)
+    expect(calls).to eq([[1, 1]])
+  ensure
+    window&.close
+  end
+
+  it "represents formatted rectangles without expanding their coordinates" do
+    workbook = Rukbat::Workbook.new
+    notification = nil
+    workbook.on_cells_changed { |sheet, cells| notification = [sheet, cells] }
+
+    workbook.format_range(1, 1, 100, 100, bold: true)
+
+    expect(notification.first).to eq("Sheet1")
+    expect(notification.last).to eq(Rukbat::Workbook::CellRange.new(top: 1, left: 1, bottom: 100, right: 100))
+    expect(notification.last.include?(100, 100)).to be(true)
+    expect(notification.last.include?(101, 100)).to be(false)
+  end
+
   it "applies a selected-range format and renders a chart from selected columns" do
     workbook = Rukbat::Workbook.new
     workbook.set_many([[1, 1, "Quarter"], [1, 2, "Sales"], [1, 3, "Cost"],
