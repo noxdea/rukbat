@@ -30,6 +30,19 @@ RSpec.describe Rukbat::PDFFile do
     end
   end
 
+  it "exports the selected font family plus bold and italic cell styles" do
+    workbook = Rukbat::Workbook.from_rows([["styled"]])
+    workbook.format_range(1, 1, 1, 1, font_family: "Abel", bold: true, italic: true)
+    face = Zaniah::TextSystem::FontDB::Face.new(path: font_path, index: 0, family: "Abel", families: ["Abel"],
+      weight: 400, width: 5, style: :normal, fixed_pitch: false, tables: [])
+    font_db = double(faces: [face])
+    expect(font_db).to receive(:open).with(font_path, index: 0).and_return(Okab::Font.load(font_path).face)
+
+    pdf = described_class.render(workbook, font: font_path, font_db: font_db)
+
+    expect(pdf).to include("2 Tr".b, "1 0 0.2 1".b, "0.28 w".b)
+  end
+
   it "paginates wide and tall sparse workbooks" do
     workbook = Rukbat::Workbook.new
     workbook.set(29, 9, "end")

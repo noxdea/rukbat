@@ -15,6 +15,14 @@ module Rukbat
     MAX_ROWS: Integer
     MAX_COLUMNS: Integer
 
+    class CellRange
+      attr_reader top: Integer
+      attr_reader left: Integer
+      attr_reader bottom: Integer
+      attr_reader right: Integer
+      def include?: (Integer row, Integer column) -> bool
+    end
+
     class Summary
       attr_reader count: Integer
       attr_reader numeric_count: Integer
@@ -29,6 +37,8 @@ module Rukbat
 
     def self.from_rows: (Enumerable[Array[untyped]] rows, ?sheet: String) -> Workbook
     def initialize: (?sheet: String) -> void
+    def on_cells_changed: () { (String? sheet, Array[[Integer, Integer]] | CellRange | nil cells) -> void } -> Proc
+    def remove_cells_changed_observer: (Proc observer) -> Proc?
     def sheet_names: () -> Array[String]
     def sheet: (?String name) -> Denebola::Sheet
     def activate: (String name) -> String
@@ -85,8 +95,8 @@ module Rukbat
   end
 
   module PDFFile
-    def self.render: (Workbook workbook, font: untyped, ?sheet: String) -> String
-    def self.write: (Workbook workbook, String path, font: untyped, ?sheet: String) -> String
+    def self.render: (Workbook workbook, font: untyped, ?sheet: String, ?font_db: untyped) -> String
+    def self.write: (Workbook workbook, String path, font: untyped, ?sheet: String, ?font_db: untyped) -> String
   end
 
   class GridView

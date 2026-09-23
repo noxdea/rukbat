@@ -13,8 +13,14 @@ module Rukbat
       @workbook, @on_save = workbook, on_save
       @active_cell, @status = [1, 1], "Ready"
       @rendered_cells = {}
+      @editing_cell = @inline_buffer = @inline_editor = nil
+      @inline_focus_pending = false
       @formula_field = UI::TextField.new("")
-      @formula_field.on_change { |text, cx| update_completion(text); cx.window.request_frame }
+      @formula_field.on_change do |text, cx|
+        update_completion(text)
+        @inline_buffer.replace(0...@inline_buffer.bytesize, text.encode(Encoding::UTF_8)) if @inline_buffer
+        cx.window.request_frame
+      end
       @function_index = Spica::Index.new(Furud::Functions.standard.names)
       @completion_session = @function_index.session
       @completion_button = UI::Button.new("Use completion", size: :sm, variant: :secondary)
@@ -88,7 +94,12 @@ module Rukbat
 
     def request_layout(cx)
       @rendered_cells_used = {}
-      super
+      layout = super
+      if @inline_focus_pending && @inline_editor&.focus_handle
+        cx.dispatcher.focus(@inline_editor.focus_handle)
+        @inline_focus_pending = false
+      end
+      layout
     ensure
       if @rendered_cells_used
         @rendered_cells.delete_if { |key, _cell| !@rendered_cells_used.key?(key) }
@@ -173,6 +184,13 @@ module Rukbat
     def handle_shortcut(event, window)
       return false unless event.is_a?(Zaniah::Input::KeyDown)
 
+      if @editing_cell
+        case event.keystroke.to_s
+        when "enter" then return commit_inline_edit
+        when "esc", "escape" then return cancel_inline_edit
+        end
+      end
+
       case event.keystroke.to_s
       when "ctrl-s", "cmd-s" then save
       when "ctrl-z", "cmd-z"
@@ -187,6 +205,11 @@ module Rukbat
     end
 
     def apply_edit
+      if @editing_cell
+        @inline_buffer.replace(0...@inline_buffer.bytesize, @formula_field.value.encode(Encoding::UTF_8))
+        return commit_inline_edit
+      end
+
       value = CSVFile.parse_cell(@formula_field.value)
       value.nil? ? @workbook.clear(*@active_cell) : @workbook.set(*@active_cell, value)
       @status = "Applied #{cell_address(*@active_cell)}"
@@ -483,6 +506,8 @@ module Rukbat
     end
 
     def render_data_cell(row, column, bounds)
+      return @inline_editor if @editing_cell == [row, column]
+
       text, style = @workbook.presentation_at(row, column)
       comment = @workbook.comment_at(row, column)
       if style.empty? && comment.nil?
@@ -530,19 +555,68 @@ module Rukbat
       row, column = [area.rows.begin, 1].max, [area.columns.begin, 1].max
       return if row > Workbook::MAX_ROWS || column > Workbook::MAX_COLUMNS
 
+      commit_inline_edit if @editing_cell && @editing_cell != [row, column]
       @active_cell = [row, column]
-      sync_formula_field
+      sync_formula_field unless @editing_cell == @active_cell
       update_status(area)
       cx.window.request_frame if cx.respond_to?(:window)
     end
 
     def begin_edit(row, column, cx)
       return if row.zero? || column.zero?
+      return if @editing_cell == [row, column]
+      return unless commit_inline_edit if @editing_cell && @editing_cell != [row, column]
 
       @active_cell = [row, column]
       sync_formula_field
+      @editing_cell = [row, column]
+      @inline_buffer = Zaniah::TextBuffer.new(@workbook.input_at(row, column).to_s.encode(Encoding::UTF_8))
+      @inline_editor = Zaniah::Text.new(@inline_buffer.to_s, size: 12, color: cx.theme.colors.text, wrap: :none)
+        .editable(@inline_buffer)
+        .style(width: percent(100), height: percent(100), padding: [0, 4])
+        .on_change do |text|
+          @formula_field.buffer.replace(0...@formula_field.buffer.bytesize, text.encode(Encoding::UTF_8))
+          update_completion(text)
+          cx.window.request_frame
+        end
+      @inline_editor.selection = Zaniah::TextSelection.new(@inline_buffer.bytesize)
+      @inline_focus_pending = true
+      @rendered_cells.delete_if { |key, _cell| key[0] == @workbook.active_sheet && key[1] == row && key[2] == column }
       cx.dispatcher.focus(@formula_field.focus_handle) if @formula_field.focus_handle
       request_frame
+    end
+
+    def commit_inline_edit
+      return false unless @editing_cell
+
+      row, column = @editing_cell
+      value = CSVFile.parse_cell(@inline_buffer.to_s)
+      value.nil? ? @workbook.clear(row, column) : @workbook.set(row, column, value)
+      @editing_cell = @inline_buffer = @inline_editor = nil
+      @inline_focus_pending = false
+      @status = "Applied #{cell_address(row, column)}"
+      @rendered_cells.delete_if { |key, _cell| key[0] == @workbook.active_sheet && key[1] == row && key[2] == column }
+      sync_formula_field
+      @cx&.dispatcher&.focus(@grid.focus_handle)
+      request_frame
+      true
+    rescue Rukbat::Error, ArgumentError, TypeError => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def cancel_inline_edit
+      return false unless @editing_cell
+
+      row, column = @editing_cell
+      @editing_cell = @inline_buffer = @inline_editor = nil
+      @inline_focus_pending = false
+      @rendered_cells.delete_if { |key, _cell| key[0] == @workbook.active_sheet && key[1] == row && key[2] == column }
+      sync_formula_field
+      @cx&.dispatcher&.focus(@grid.focus_handle)
+      request_frame
+      true
     end
 
     def fill(source, target)

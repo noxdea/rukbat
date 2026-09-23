@@ -15,6 +15,43 @@ RSpec.describe Rukbat::GridView do
     expect(workbook.input_at(1, 2)).to be_nil
   end
 
+  it "edits cells in place, keeps the formula bar synchronized, and commits with Enter" do
+    workbook = Rukbat::Workbook.from_rows([["original", "=1+2"]])
+    view = described_class.new(workbook)
+    window = Zaniah::Platform::Headless::Window.new(width: 800, height: 600)
+    window.on_input { |event| view.handle_shortcut(event, window) }
+    context = Zaniah::FrameContext.new(window)
+    view.request_layout(context)
+
+    view.__send__(:begin_edit, 1, 1, context)
+    view.request_layout(context)
+    editor = view.__send__(:render_cell, 1, 1, Zaniah::Bounds.new(0, 0, 112, 24))
+    expect(editor).to be_a(Zaniah::Text)
+    expect(window.dispatcher.focused).to equal(editor.focus_handle)
+
+    window.input(Zaniah::Input::TextInput.new(" updated"))
+    expect(editor.buffer.to_s).to eq("original updated")
+    expect(view.formula_field.value).to eq("original updated")
+    window.input(Zaniah::Input::KeyDown.new("enter", false))
+
+    expect(workbook.input_at(1, 1)).to eq("original updated")
+    expect(view.formula_field.value).to eq("original updated")
+    expect(view.instance_variable_get(:@editing_cell)).to be_nil
+
+    view.__send__(:begin_edit, 1, 2, context)
+    view.request_layout(context)
+    editor = view.__send__(:render_cell, 1, 2, Zaniah::Bounds.new(112, 0, 112, 24))
+    expect(editor.buffer.to_s).to eq("=1+2")
+    window.input(Zaniah::Input::TextInput.new(" discarded"))
+    window.input(Zaniah::Input::KeyDown.new("esc", false))
+
+    expect(workbook.formula(1, 2)).to eq("=1+2")
+    expect(view.formula_field.value).to eq("=1+2")
+    expect(view.instance_variable_get(:@editing_cell)).to be_nil
+  ensure
+    window&.close
+  end
+
   it "writes #REF when formula translation leaves the grid" do
     workbook = Rukbat::Workbook.new
     workbook.set(1, 2, "=A1")

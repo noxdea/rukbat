@@ -15,8 +15,9 @@ module Rukbat
 
     module_function
 
-    def render(workbook, font:, sheet: workbook.active_sheet)
+    def render(workbook, font:, sheet: workbook.active_sheet, font_db: nil)
       font = normalize_font(font)
+      font_cache = {}
       current = workbook.sheet(sheet)
       area = workbook.print_area(sheet: sheet)
       origin_row, origin_column = area ? [area.top - 1, area.left - 1] : [0, 0]
@@ -27,15 +28,15 @@ module Rukbat
       document = Okab::Document.new(title: "#{sheet} — Rukbat", author: "Yudai Takada", creator: "Rukbat")
       (0...rows).step(ROWS_PER_PAGE) do |row_offset|
         (0...columns).step(COLUMNS_PER_PAGE) do |column_offset|
-          render_page(document, workbook, font, sheet, origin_row, origin_column, row_offset, column_offset,
+          render_page(document, workbook, font, font_db, font_cache, sheet, origin_row, origin_column, row_offset, column_offset,
             [rows - row_offset, ROWS_PER_PAGE].min, [columns - column_offset, COLUMNS_PER_PAGE].min)
         end
       end
       document.render
     end
 
-    def write(workbook, path, font:, sheet: workbook.active_sheet)
-      bytes = render(workbook, font: font, sheet: sheet)
+    def write(workbook, path, font:, sheet: workbook.active_sheet, font_db: nil)
+      bytes = render(workbook, font: font, sheet: sheet, font_db: font_db)
       target = File.expand_path(path)
       stat = File.lstat(target) if File.exist?(target) || File.symlink?(target)
       raise Error, "PDF target must be a regular file" if stat && !stat.file?
@@ -53,7 +54,7 @@ module Rukbat
       raise Error, "cannot write PDF: #{error.message}"
     end
 
-    def render_page(document, workbook, font, sheet, origin_row, origin_column, row_offset, column_offset, row_count, column_count)
+    def render_page(document, workbook, font, font_db, font_cache, sheet, origin_row, origin_column, row_offset, column_offset, row_count, column_count)
       document.page(width: PAGE_WIDTH, height: PAGE_HEIGHT) do |page|
         first_row = origin_row + row_offset + 1
         last_row = first_row + row_count - 1
@@ -67,7 +68,7 @@ module Rukbat
             y = data_top - row_index * CELL_HEIGHT
             text, style = cell_text(workbook, sheet, origin_row, origin_column,
               row_offset, column_offset, row_index, column_index)
-            paint_cell(page, text, style, font, x, y, width)
+            paint_cell(page, text, style, font_for_style(style, font, font_db, font_cache), x, y, width)
           end
         end
       end
@@ -110,10 +111,27 @@ module Rukbat
         else y + (CELL_HEIGHT - size) / 2
         end
         page.text(text, x: text_x, y: baseline, font: font, size: size,
-          color: rgb(style[:color] || "#20242C"))
+          color: rgb(style[:color] || "#20242C"), bold: style[:bold] || false, italic: style[:italic] || false)
       end
     end
     private_class_method :paint_cell
+
+    def font_for_style(style, fallback, font_db, cache)
+      family = style[:font_family]
+      return fallback unless family
+
+      key = family.unicode_normalize(:nfkc).downcase(:fold).gsub(/\s+/, " ").strip
+      cache[key] ||= begin
+        database = font_db || Zaniah::TextSystem::FontDB.new
+        face = database.faces.find do |candidate|
+          candidate.families.any? { |name| name.unicode_normalize(:nfkc).downcase(:fold).gsub(/\s+/, " ").strip == key }
+        end
+        raise Error, "font family is not installed: #{family}" unless face
+
+        Okab::Font.new(database.open(face.path, index: face.index))
+      end
+    end
+    private_class_method :font_for_style
 
     def fit_text(text, font, size, width)
       return text if font.measure(text, size: size) <= width

@@ -77,8 +77,10 @@ font and output path, applying the current print area. The CLI can also export
 with `bundle exec rukbat --export-pdf report.pdf --font /path/to/font.ttf`.
 Print areas are session metadata; CSV has no place to store them, so they reset
 when the workbook is reopened.
-PDF export embeds the supplied font and writes cell values and basic cell
-styling; it does not yet render charts.
+PDF export embeds the supplied font, resolves formatted font families from the
+system font database, and applies bold/italic along with cell formatting; bold
+and italic are synthesized in the PDF when the selected face has no matching
+variant. Charts are not yet rendered.
 
 ## Development
 
