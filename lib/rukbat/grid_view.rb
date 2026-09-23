@@ -555,7 +555,13 @@ module Rukbat
       row, column = [area.rows.begin, 1].max, [area.columns.begin, 1].max
       return if row > Workbook::MAX_ROWS || column > Workbook::MAX_COLUMNS
 
-      commit_inline_edit if @editing_cell && @editing_cell != [row, column]
+      if @editing_cell && @editing_cell != [row, column] && !commit_inline_edit
+        edited_row, edited_column = @editing_cell
+        @grid.selection = [UI::Grid::Area.new(rows: edited_row...(edited_row + 1),
+          columns: edited_column...(edited_column + 1))]
+        cx.window.request_frame if cx.respond_to?(:window)
+        return
+      end
       @active_cell = [row, column]
       sync_formula_field unless @editing_cell == @active_cell
       update_status(area)

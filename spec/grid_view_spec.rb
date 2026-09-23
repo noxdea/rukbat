@@ -52,6 +52,29 @@ RSpec.describe Rukbat::GridView do
     window&.close
   end
 
+  it "keeps an invalid inline edit selected instead of losing it on navigation" do
+    workbook = Rukbat::Workbook.from_rows([["original", "other"]])
+    view = described_class.new(workbook)
+    window = Zaniah::Platform::Headless::Window.new(width: 800, height: 600)
+    context = Zaniah::FrameContext.new(window)
+    view.request_layout(context)
+    original = area(1...2, 1...2)
+    view.grid.selection = [original]
+    view.__send__(:begin_edit, 1, 1, context)
+    input = "=SUM("
+    view.instance_variable_get(:@inline_buffer).replace(0..."original".bytesize, input)
+
+    view.__send__(:selection_changed, [area(1...2, 2...3)], context)
+
+    expect(view.grid.selection).to eq([original])
+    expect(view.active_cell).to eq([1, 1])
+    expect(view.instance_variable_get(:@editing_cell)).to eq([1, 1])
+    expect(view.instance_variable_get(:@inline_buffer).to_s).to eq(input)
+    expect(workbook.input_at(1, 1)).to eq("original")
+  ensure
+    window&.close
+  end
+
   it "writes #REF when formula translation leaves the grid" do
     workbook = Rukbat::Workbook.new
     workbook.set(1, 2, "=A1")
