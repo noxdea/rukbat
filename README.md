@@ -66,7 +66,11 @@ count, numeric count, sum, and average appear in the status bar.
 
 The toolbar provides common number, font, alignment, fill, and border formats;
 sorting, filtering, duplicate removal, search/replace, comments, named ranges,
-positive-value highlighting, freeze panes, print areas, and line/bar/pie charts.
+positive-value highlighting, freeze/unfreeze panes, print areas, and line/bar/pie charts.
+Freeze panes are kept per sheet and restored by undo/redo; the selected cell and
+the row/column headers before it stay visible while scrolling. **Unfreeze** removes
+all frozen rows and columns. Clear highlights removes conditional formatting
+from the active sheet.
 Select a range and choose **Set print area** to constrain PDF export; **Clear
 print area** restores full-sheet output. **Export PDF** prompts for an embeddable
 font and output path, applying the current print area. The CLI can also export

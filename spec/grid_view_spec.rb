@@ -92,6 +92,40 @@ RSpec.describe Rukbat::GridView do
     expect(view.grid.column_hidden?(3)).to be(false)
   end
 
+  it "freezes through the selected cell, restores each sheet, and supports undo and unfreeze" do
+    workbook = Rukbat::Workbook.new
+    workbook.set_frozen_panes(rows: 4, columns: 3, sheet: "Sheet1")
+    workbook.add_sheet("Other")
+    view = described_class.new(workbook)
+    expect(view.grid.instance_variable_get(:@frozen_rows)).to eq(1)
+
+    workbook.activate("Sheet1")
+    view.__send__(:sync_frozen_panes)
+    expect([view.grid.instance_variable_get(:@frozen_rows), view.grid.instance_variable_get(:@frozen_columns)])
+      .to eq([4, 3])
+    view.instance_variable_set(:@active_cell, [2, 3])
+    expect(view.__send__(:freeze_panes)).to be(true)
+    expect(workbook.frozen_panes).to eq([3, 4]) # Include grid row/column zero headers.
+    view.undo
+    expect(workbook.frozen_panes).to eq([4, 3])
+    view.redo
+    expect(workbook.frozen_panes).to eq([3, 4])
+    expect(view.__send__(:unfreeze_panes)).to be(true)
+    expect(workbook.frozen_panes).to eq([0, 0])
+  end
+
+  it "clears positive-value conditional formatting from the active sheet" do
+    workbook = Rukbat::Workbook.new
+    workbook.set(1, 1, 2)
+    view = described_class.new(workbook)
+    view.grid.selection = [area(1...2, 1...2)]
+
+    expect(view.__send__(:highlight_positive)).to be(true)
+    expect(workbook.presentation_at(1, 1).last[:color]).to eq("#008000")
+    expect(view.__send__(:clear_highlights)).to be(true)
+    expect(workbook.presentation_at(1, 1).last).not_to have_key(:color)
+  end
+
   it "refreshes hidden axes and comments after undo" do
     workbook = Rukbat::Workbook.new
     workbook.set_comment(1, 1, "before")

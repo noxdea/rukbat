@@ -8,6 +8,6 @@
 - Add a virtualized million-row grid, formula bar, selection summaries, and function-name completion.
 - Refuse stale-file and unexpected-file overwrites when saving CSV/TSV.
 - Add undoable formatting, sorting, filtering, duplicate removal, and find/replace.
-- Add comments, named ranges, conditional formatting, hidden axes, and freeze panes.
+- Add comments, named ranges, conditional formatting with a clear action, hidden axes, and per-sheet undoable freeze panes.
 - Add undoable per-sheet print areas and export the selected range to PDF.
 - Add line, bar, and pie charts plus paginated, searchable PDF export.

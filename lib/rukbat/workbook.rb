@@ -39,6 +39,7 @@ module Rukbat
       @conditional_formats = [].freeze
       @hidden_rows = {}.freeze
       @hidden_columns = {}.freeze
+      @frozen_panes = {name => {rows: 1, columns: 1}.freeze}.freeze
       @print_areas = {}.freeze
       @source = CellSource.new(self)
       @engine = Furud::Engine.new(@source)
@@ -64,6 +65,7 @@ module Rukbat
 
       record_history
       @sheets = @sheets.merge(name => Denebola::Sheet.new)
+      @frozen_panes = @frozen_panes.merge(name => {rows: 1, columns: 1}.freeze).freeze
       rebuild_engine
       @active_sheet = name
     end
@@ -82,6 +84,7 @@ module Rukbat
       @conditional_formats = @conditional_formats.reject { |rule| rule[:area].sheet == name }.freeze
       @hidden_rows = @hidden_rows.reject { |sheet_name, _| sheet_name == name }.freeze
       @hidden_columns = @hidden_columns.reject { |sheet_name, _| sheet_name == name }.freeze
+      @frozen_panes = @frozen_panes.reject { |sheet_name, _| sheet_name == name }.freeze
       @print_areas = @print_areas.reject { |sheet_name, _| sheet_name == name }.freeze
       @active_sheet = @sheets.keys.first if @active_sheet == name
       rebuild_engine
@@ -422,10 +425,14 @@ module Rukbat
       top, left, bottom, right, name = range_coordinates(top, left, bottom, right, sheet)
       operator = operator.to_sym if operator.is_a?(String) || operator.is_a?(Symbol)
       raise Error, "unsupported conditional format operator" unless CONDITIONAL_OPERATORS.include?(operator)
-      raise Error, "conditional format limit exceeded" if @conditional_formats.length >= MAX_CONDITIONAL_FORMATS
+      raise Error, "conditional format style must be a Hash" unless style.is_a?(Hash)
 
       rule = {area: Furud::Area.new(sheet: name, top: top, left: left, bottom: bottom, right: right),
-        operator: operator, value: value, style: normalize_format(style)}.freeze
+        operator: operator, value: value.is_a?(String) ? value.dup.freeze : value,
+        style: normalize_format(style)}.freeze
+      return self if @conditional_formats.include?(rule)
+      raise Error, "conditional format limit exceeded" if @conditional_formats.length >= MAX_CONDITIONAL_FORMATS
+
       record_history
       @conditional_formats = (@conditional_formats + [rule]).freeze
       self
@@ -486,6 +493,32 @@ module Rukbat
       self
     rescue KeyError
       raise Error, "hidden axis must be rows or columns"
+    end
+
+    def set_frozen_panes(rows:, columns:, sheet: @active_sheet)
+      name = sheet.to_s
+      raise Error, "unknown sheet: #{name}" unless @sheets.key?(name)
+      rows, columns = strict_integer(rows), strict_integer(columns)
+      unless rows.between?(0, MAX_ROWS + 1) && columns.between?(0, MAX_COLUMNS + 1)
+        raise Error, "frozen pane counts are outside sheet limits"
+      end
+
+      panes = {rows: rows, columns: columns}.freeze
+      return self if @frozen_panes[name] == panes
+
+      record_history
+      @frozen_panes = @frozen_panes.merge(name => panes).freeze
+      self
+    rescue ArgumentError, TypeError
+      raise Error, "frozen pane counts must be integers"
+    end
+
+    def frozen_panes(sheet: @active_sheet)
+      name = sheet.to_s
+      raise Error, "unknown sheet: #{name}" unless @sheets.key?(name)
+
+      panes = @frozen_panes.fetch(name, {rows: 1, columns: 1})
+      [panes[:rows], panes[:columns]].freeze
     end
 
     def set_print_area(top, left, bottom, right, sheet: @active_sheet)
@@ -643,10 +676,10 @@ module Rukbat
     end
 
     def snapshot = [@sheets.dup, @active_sheet, @names.dup, @formats.dup, @comments.dup,
-      @conditional_formats.dup, @hidden_rows.dup, @hidden_columns.dup, @print_areas.dup]
+      @conditional_formats.dup, @hidden_rows.dup, @hidden_columns.dup, @frozen_panes.dup, @print_areas.dup]
 
     def restore(state)
-      @sheets, @active_sheet, @names, @formats, @comments, @conditional_formats, @hidden_rows, @hidden_columns, @print_areas = state
+      @sheets, @active_sheet, @names, @formats, @comments, @conditional_formats, @hidden_rows, @hidden_columns, @frozen_panes, @print_areas = state
       rebuild_engine
     end
 
@@ -753,7 +786,9 @@ module Rukbat
       area_extent = [area_extent, print_extent].max
       hidden_extent = (type.to_s.end_with?("rows") ? @hidden_rows : @hidden_columns)
         .fetch(name, Set.new).max || 0
-      occupied_extent = [occupied_extent, metadata_extent, area_extent, hidden_extent].max
+      panes = @frozen_panes.fetch(name, {rows: 1, columns: 1})
+      frozen_extent = panes.fetch(type.to_s.end_with?("rows") ? :rows : :columns) - 1
+      occupied_extent = [occupied_extent, metadata_extent, area_extent, hidden_extent, frozen_extent].max
 
       if type.to_s.start_with?("delete")
         operation = Furud::Adjustment.new(type: type, sheet: name, at: at, count: count)
@@ -840,7 +875,21 @@ module Rukbat
         adjusted = sheet_name == sheet ? adjusted_area(area, operation) : area
         [sheet_name, adjusted] if adjusted
       end.to_h.freeze
+      panes = @frozen_panes.fetch(sheet, {rows: 1, columns: 1})
+      axis = type.to_s.end_with?("rows") ? :rows : :columns
+      @frozen_panes = @frozen_panes.merge(sheet => panes.merge(axis => adjust_frozen_count(panes.fetch(axis), type, at, count)).freeze).freeze
       @names.each { |name, area| @engine.define_name(name, area) }
+    end
+
+    def adjust_frozen_count(frozen_count, type, at, count)
+      frozen_cells = frozen_count - 1 # Grid row/column zero is the header.
+      if type.to_s.start_with?("insert")
+        at <= frozen_cells ? frozen_count + count : frozen_count
+      elsif at <= frozen_cells
+        frozen_count - [frozen_cells - at + 1, count].min
+      else
+        frozen_count
+      end
     end
 
     def move_hidden_indices(hidden, type, at, count, target_sheet, axis)

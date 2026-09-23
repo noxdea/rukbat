@@ -45,6 +45,17 @@ RSpec.describe Rukbat::Workbook do
     expect(workbook[1, 2]).to eq(24)
   end
 
+  it "resolves named ranges case-insensitively and recalculates on redefinition and row insertion" do
+    workbook.set_many([[1, 1, 7], [2, 1, 9], [1, 2, "=taxrate"]])
+    workbook.define_name("TaxRate", 1, 1, 1, 1)
+    expect(workbook[1, 2]).to eq(7)
+
+    workbook.define_name("TAXRATE", 2, 1, 2, 1)
+    expect(workbook[1, 2]).to eq(9)
+    workbook.insert_rows(1)
+    expect(workbook[2, 2]).to eq(9)
+  end
+
   it "finds and replaces sparse input without partially applying invalid formulas" do
     workbook.set(1, 1, "hello").set(2, 1, "hello")
     workbook.set(1, 2, "=A1+1")
@@ -120,6 +131,40 @@ RSpec.describe Rukbat::Workbook do
     expect(workbook.presentation_at(3, 1).last[:background]).to eq("#CCFFCC")
     expect(workbook.undo).to be(true)
     expect(workbook.comment_at(2, 1)).to eq("Reviewed")
+  end
+
+  it "deduplicates conditional rules, validates their styles, and clears them with undo" do
+    workbook.set(1, 1, 5)
+    rule = {operator: :greater_than, value: 0, style: {color: "#008000"}}
+    workbook.add_conditional_format(1, 1, 1, 1, **rule)
+    workbook.add_conditional_format(1, 1, 1, 1, **rule)
+    expect(workbook.presentation_at(1, 1).last[:color]).to eq("#008000")
+
+    workbook.clear_conditional_formats
+    expect(workbook.presentation_at(1, 1).last).not_to have_key(:color)
+    expect(workbook.undo).to be(true)
+    expect(workbook.presentation_at(1, 1).last[:color]).to eq("#008000")
+    expect { workbook.add_conditional_format(1, 1, 1, 1, operator: :equal, value: 5, style: nil) }
+      .to raise_error(Rukbat::Error, /style must be a Hash/)
+  end
+
+  it "keeps freeze panes per sheet and adjusts them through structural edits and history" do
+    workbook.set_frozen_panes(rows: 3, columns: 4)
+    workbook.add_sheet("Other")
+    expect(workbook.frozen_panes).to eq([1, 1])
+    expect(workbook.frozen_panes(sheet: "Sheet1")).to eq([3, 4])
+    expect(workbook.undo).to be(true)
+
+    workbook.insert_rows(2, 2)
+    workbook.insert_columns(2)
+    expect(workbook.frozen_panes).to eq([5, 5])
+    workbook.delete_rows(2, 3)
+    workbook.delete_columns(3, 2)
+    expect(workbook.frozen_panes).to eq([2, 3])
+    expect(workbook.undo).to be(true)
+    expect(workbook.frozen_panes).to eq([2, 5])
+    expect { workbook.set_frozen_panes(rows: -1, columns: 1) }
+      .to raise_error(Rukbat::Error, /outside sheet limits/)
   end
 
   it "keeps hidden row and column state through structural edits and history" do

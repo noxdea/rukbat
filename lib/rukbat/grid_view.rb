@@ -28,6 +28,8 @@ module Rukbat
       @bold_button = UI::Button.new("Bold", size: :sm, variant: :ghost).on_click { toggle_bold }
       @fill_button = UI::Button.new("Fill", size: :sm, variant: :ghost).on_click { apply_format(background: "#FFF2CC") }
       @freeze_button = UI::Button.new("Freeze", size: :sm, variant: :ghost).on_click { freeze_panes }
+      @unfreeze_button = UI::Button.new("Unfreeze", size: :sm, variant: :ghost).on_click { unfreeze_panes }
+      @clear_conditional_button = UI::Button.new("Clear highlights", size: :sm, variant: :ghost).on_click { clear_highlights }
       @line_chart_button = UI::Button.new("Line", size: :sm, variant: :ghost).on_click { show_chart(:line) }
       @bar_chart_button = UI::Button.new("Bar", size: :sm, variant: :ghost).on_click { show_chart(:bar) }
       @pie_chart_button = UI::Button.new("Pie", size: :sm, variant: :ghost).on_click { show_chart(:pie) }
@@ -66,9 +68,10 @@ module Rukbat
       @filter_hidden_rows = []
       @applied_hidden_rows = []
       @applied_hidden_columns = []
+      frozen_rows, frozen_columns = @workbook.frozen_panes
       @grid = UI::Grid.new(rows: Workbook::MAX_ROWS + 1, columns: Workbook::MAX_COLUMNS + 1,
         row_height: 24, column_width: ->(index) { index.zero? ? 52 : 112 },
-        frozen_rows: 1, frozen_columns: 1) do |row, column, _bounds, _cx|
+        frozen_rows: frozen_rows, frozen_columns: frozen_columns) do |row, column, _bounds, _cx|
         render_cell(row, column)
       end
       @grid.on_select { |areas, _event, cx| selection_changed(areas, cx) }
@@ -83,7 +86,8 @@ module Rukbat
       toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
         .child(@undo_button).child(@redo_button).child(@save_button).child(@add_sheet_button)
         .child(@number_button).child(@percent_button).child(@bold_button).child(@fill_button)
-        .child(@freeze_button).child(@line_chart_button).child(@bar_chart_button).child(@pie_chart_button)
+        .child(@freeze_button).child(@unfreeze_button).child(@clear_conditional_button)
+        .child(@line_chart_button).child(@bar_chart_button).child(@pie_chart_button)
       format_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
         .child(@font_down_button).child(@font_up_button).child(@align_button)
         .child(@text_color_button).child(@border_button)
@@ -108,6 +112,7 @@ module Rukbat
           clear_filter
           @workbook.activate(name)
           sync_grid_visibility
+          sync_frozen_panes
           sync_formula_field
           update_status
         end)
@@ -132,6 +137,7 @@ module Rukbat
     def undo
       @status = @workbook.undo ? "Undone" : "Nothing to undo"
       sync_grid_visibility
+      sync_frozen_panes
       sync_formula_field
       request_frame
     end
@@ -139,6 +145,7 @@ module Rukbat
     def redo
       @status = @workbook.redo ? "Redone" : "Nothing to redo"
       sync_grid_visibility
+      sync_frozen_panes
       sync_formula_field
       request_frame
     end
@@ -425,6 +432,17 @@ module Rukbat
       false
     end
 
+    def clear_highlights
+      @workbook.clear_conditional_formats
+      @status = "Conditional formatting cleared"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
     private
 
     def render_cell(row, column)
@@ -569,10 +587,25 @@ module Rukbat
     end
 
     def freeze_panes
-      @grid.freeze_panes(rows: @active_cell[0], columns: @active_cell[1])
+      rows, columns = @active_cell[0] + 1, @active_cell[1] + 1
+      @workbook.set_frozen_panes(rows: rows, columns: columns)
+      @grid.freeze_panes(rows: rows, columns: columns)
       @status = "Frozen through #{cell_address(*@active_cell)}"
       request_frame
       true
+    end
+
+    def unfreeze_panes
+      @workbook.set_frozen_panes(rows: 0, columns: 0)
+      @grid.freeze_panes(rows: 0, columns: 0)
+      @status = "Unfrozen panes"
+      request_frame
+      true
+    end
+
+    def sync_frozen_panes
+      rows, columns = @workbook.frozen_panes
+      @grid.freeze_panes(rows: rows, columns: columns)
     end
 
     def show_chart(type)
@@ -642,6 +675,7 @@ module Rukbat
       index += 1 while @workbook.sheet_names.include?(name)
       @workbook.add_sheet(name)
       sync_grid_visibility
+      sync_frozen_panes
       @active_cell = [1, 1]
       sync_formula_field
       @status = "Added #{name}"
