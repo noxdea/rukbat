@@ -1,0 +1,416 @@
+# frozen_string_literal: true
+
+require "tmpdir"
+
+RSpec.describe Rukbat::Workbook do
+  subject(:workbook) { described_class.new }
+
+  it "stores sparse cell inputs and recalculates formulas through Furud" do
+    workbook.set(1, 1, 12)
+    workbook.set(2, 1, 30)
+    workbook.set(1, 2, "=SUM(A1:A2)")
+
+    expect(workbook[1, 2]).to eq(42)
+    expect(workbook.formula(1, 2)).to eq("=SUM(A1:A2)")
+    expect(workbook.sheet.cell_count).to eq(3)
+    expect(workbook.each_in(1, 1, 2, 2).to_a).to include([Furud::Reference.new(sheet: "Sheet1", row: 1, column: 2), 42])
+  end
+
+  it "recalculates dependents when a source cell changes" do
+    workbook.set(1, 1, 4)
+    workbook.set(1, 2, "=A1*3")
+    workbook.set(1, 1, 5)
+
+    expect(workbook[1, 2]).to eq(15)
+  end
+
+  it "supports named sheets and cross-sheet formulas" do
+    workbook.add_sheet("Annual Plan")
+    workbook.set(1, 1, 25, sheet: "Annual Plan")
+    workbook.activate("Sheet1")
+    workbook.set(1, 1, "='Annual Plan'!A1+2")
+
+    expect(workbook[1, 1]).to eq(27)
+  end
+
+  it "supports named ranges through undo and redo" do
+    workbook.set(1, 1, 12)
+    workbook.define_name("TaxRate", 1, 1, 1, 1)
+    workbook.set(1, 2, "=TaxRate*2")
+
+    expect(workbook[1, 2]).to eq(24)
+    expect(workbook.undo).to be(true)
+    expect(workbook.input_at(1, 2)).to be_nil
+    expect(workbook.redo).to be(true)
+    expect(workbook[1, 2]).to eq(24)
+  end
+
+  it "finds and replaces sparse input without partially applying invalid formulas" do
+    workbook.set(1, 1, "hello").set(2, 1, "hello")
+    workbook.set(1, 2, "=A1+1")
+
+    expect(workbook.find("hello").map(&:row)).to eq([1, 2])
+    expect(workbook.replace_all("hello", "goodbye")).to eq(2)
+    expect(workbook.input_at(1, 1)).to eq("goodbye")
+    expect(workbook.input_at(2, 1)).to eq("goodbye")
+    expect { workbook.replace_all("A1+1", "1+") }.to raise_error(Rukbat::Error, /invalid formula/)
+    expect(workbook.input_at(1, 2)).to eq("=A1+1")
+  end
+
+  it "sorts a bounded range and adjusts formulas with their rows" do
+    workbook.set_many([[1, 1, 3], [1, 2, "=A1*10"], [2, 1, 1], [2, 2, "=A2*10"], [3, 1, 2], [3, 2, "=A3*10"]])
+
+    workbook.sort(1, 1, 3, 2, by: 1)
+
+    expect((1..3).map { |row| workbook[row, 1] }).to eq([1, 2, 3])
+    expect((1..3).map { |row| workbook.formula(row, 2) }).to eq(["=A1*10", "=A2*10", "=A3*10"])
+    expect((1..3).map { |row| workbook[row, 2] }).to eq([10, 20, 30])
+  end
+
+  it "sorts cell comments and formats with their row values" do
+    workbook = described_class.from_rows([["Name", "Score"], ["B", 2], ["A", 1]])
+    workbook.format_range(2, 1, 2, 1, bold: true)
+    workbook.set_comment(2, 1, "belongs to B")
+
+    workbook.sort(2, 1, 3, 2, by: 1)
+
+    expect(workbook.input_at(3, 1)).to eq("B")
+    expect(workbook.format_at(3, 1)).to include(bold: true)
+    expect(workbook.comment_at(3, 1)).to eq("belongs to B")
+    expect(workbook.undo).to be(true)
+    expect(workbook.comment_at(2, 1)).to eq("belongs to B")
+  end
+
+  it "filters calculated values and removes duplicate rows without losing formula references" do
+    workbook = described_class.from_rows([["Name", "Count"], ["A", 3], ["B", 4], ["A", 3], ["Total", "=SUM(B2:B4)"]])
+
+    expect(workbook.filter_rows(2, 5, by: 1, query: "b")).to eq([3])
+    expect(workbook.remove_duplicates(2, 1, 4, 2)).to eq(1)
+    expect(workbook.input_at(4, 2)).to eq("=SUM(B2:B3)")
+    expect(workbook[4, 2]).to eq(7)
+    expect(workbook.undo).to be(true)
+    expect(workbook.input_at(5, 2)).to eq("=SUM(B2:B4)")
+  end
+
+  it "rejects duplicate removal that would delete a named range entirely" do
+    workbook = described_class.from_rows([["A"], ["A"]])
+    workbook.define_name("OnlyDuplicate", 2, 1, 2, 1)
+
+    expect { workbook.remove_duplicates(1, 1, 2, 1) }.to raise_error(Rukbat::Error, /named range/)
+    expect(workbook.input_at(2, 1)).to eq("A")
+  end
+
+  it "formats values and keeps comments and conditional styles through row edits and undo" do
+    workbook.set(2, 1, 1234.5)
+    workbook.format_range(2, 1, 2, 1, number_format: "$#,##0.00", bold: true,
+      color: "#112233", background: "#EEEEEE", border_color: "#000000", border_width: 1,
+      horizontal_alignment: :right, vertical_alignment: :middle)
+    workbook.set_comment(2, 1, "Reviewed")
+    workbook.add_conditional_format(2, 1, 2, 1, operator: :greater_than, value: 1000,
+      style: {background: "#CCFFCC"})
+
+    presentation = workbook.presentation_at(2, 1)
+    expect(presentation.first).to eq("$1,234.50")
+    expect(presentation.last).to include(bold: true, background: "#CCFFCC")
+    expect(workbook.comment_at(2, 1)).to eq("Reviewed")
+    workbook.insert_rows(1)
+    expect(workbook.presentation_at(3, 1).first).to eq("$1,234.50")
+    expect(workbook.format_at(3, 1)[:bold]).to be(true)
+    expect(workbook.comment_at(3, 1)).to eq("Reviewed")
+    expect(workbook.presentation_at(3, 1).last[:background]).to eq("#CCFFCC")
+    expect(workbook.undo).to be(true)
+    expect(workbook.comment_at(2, 1)).to eq("Reviewed")
+  end
+
+  it "keeps hidden row and column state through structural edits and history" do
+    workbook = described_class.new
+    workbook.hide_rows(3)
+    workbook.hide_columns(2)
+    workbook.insert_rows(1)
+    workbook.insert_columns(1)
+
+    expect(workbook.row_hidden?(4)).to be(true)
+    expect(workbook.column_hidden?(3)).to be(true)
+    expect(workbook.hidden_rows).to eq([4])
+    expect(workbook.undo).to be(true)
+    expect(workbook.column_hidden?(2)).to be(true)
+    expect(workbook.row_hidden?(4)).to be(true)
+    expect(workbook.undo).to be(true)
+    expect(workbook.row_hidden?(3)).to be(true)
+    workbook.clear_hidden(:rows)
+    expect(workbook.hidden_rows).to be_empty
+  end
+
+  it "summarizes a selected rectangle from Denebola" do
+    workbook.set(1, 1, 10)
+    workbook.set(2, 1, 20)
+    workbook.set(2, 2, "label")
+    workbook.set(1, 2, "=A1+A2")
+
+    expect(workbook.summary(1, 1, 2, 2)).to have_attributes(
+      count: 4, numeric_count: 3, sum: 60, min: 10, max: 30, average: 20.0)
+  end
+
+  it "preserves and adjusts formula references during row insertion" do
+    workbook.set(5, 1, 9)
+    workbook.set(1, 2, "=A5")
+    workbook.insert_rows(2)
+
+    expect(workbook.formula(1, 2)).to eq("=A6")
+    expect(workbook[1, 2]).to eq(9)
+    expect(workbook[6, 1]).to eq(9)
+  end
+
+  it "replaces deleted cell references with #REF! and moves column data" do
+    workbook.set(4, 1, 9)
+    workbook.set(1, 2, "=A4")
+    workbook.delete_rows(4)
+    expect(workbook.formula(1, 2)).to eq("=#REF!")
+    expect(workbook[1, 2].to_s).to eq("#REF!")
+
+    workbook.set(1, 1, "left")
+    workbook.insert_columns(1)
+    expect(workbook[1, 2]).to eq("left")
+  end
+
+  it "undoes and redoes edits using persistent sheet snapshots" do
+    workbook.set(1, 1, 3)
+    workbook.set(1, 1, 8)
+    expect(workbook[1, 1]).to eq(8)
+
+    expect(workbook.undo).to be(true)
+    expect(workbook[1, 1]).to eq(3)
+    expect(workbook.redo).to be(true)
+    expect(workbook[1, 1]).to eq(8)
+  end
+
+  it "rejects invalid formulas without changing workbook or redo state" do
+    workbook.set(1, 1, 3)
+    workbook.set(1, 1, 8)
+    expect(workbook.undo).to be(true)
+
+    expect { workbook.set(1, 1, "=1+") }.to raise_error(Rukbat::Error, /invalid formula/)
+    expect(workbook.input_at(1, 1)).to eq(3)
+    expect(workbook[1, 1]).to eq(3)
+    expect(workbook.redo).to be(true)
+    expect(workbook[1, 1]).to eq(8)
+  end
+
+  it "validates every formula in a batch before applying any changes" do
+    expect { workbook.set_many([[1, 1, 4], [1, 2, "=1+"]]) }
+      .to raise_error(Rukbat::Error, /invalid formula/)
+
+    expect(workbook.input_at(1, 1)).to be_nil
+    expect(workbook.input_at(1, 2)).to be_nil
+    expect(workbook[1, 1]).to be_nil
+  end
+
+  it "applies a group of cell changes as one undoable recalculation" do
+    workbook.set_many([[1, 1, 4], [1, 2, "=A1*2"], [2, 1, 8]])
+    expect(workbook[1, 2]).to eq(8)
+    expect(workbook.input_at(1, 1)).to eq(4)
+    expect(workbook.input_at(1, 2)).to eq("=A1*2")
+    expect(workbook.input_at(2, 1)).to eq(8)
+    expect(workbook.undo).to be(true)
+    expect(workbook[1, 1]).to be_nil
+    expect(workbook[1, 2]).to be_nil
+  end
+
+  it "validates sheet names and spreadsheet coordinates" do
+    expect { workbook.add_sheet("Bad/Name") }.to raise_error(Rukbat::Error)
+    expect { workbook.set(0, 1, 1) }.to raise_error(Rukbat::Error)
+    expect { workbook.set(1, 16_385, 1) }.to raise_error(Rukbat::Error)
+    expect { workbook.set(1.5, 1, 1) }.to raise_error(Rukbat::Error)
+  end
+
+  it "validates selection rectangles before summary and sparse iteration" do
+    expect { workbook.summary(0, 1, 1, 1) }.to raise_error(Rukbat::Error, /range coordinates/)
+    expect { workbook.summary(2, 1, 1, 1) }.to raise_error(Rukbat::Error, /range coordinates/)
+    expect { workbook.each_in(1, 1, 1, 16_385).to_a }.to raise_error(Rukbat::Error, /range coordinates/)
+  end
+
+  it "prevents removing a sheet that is explicitly referenced by a formula" do
+    workbook.add_sheet("Data")
+    workbook.set(1, 1, 42, sheet: "Data")
+    workbook.activate("Sheet1")
+    workbook.set(1, 1, "=Data!A1+1")
+
+    expect { workbook.remove_sheet("Data") }.to raise_error(Rukbat::Error, /referenced sheet/)
+    expect(workbook[1, 1]).to eq(43)
+    expect(workbook.sheet_names).to include("Data")
+  end
+
+  it "rejects structural insertions that would move cells past the sheet boundary" do
+    workbook.set(Rukbat::Workbook::MAX_ROWS, 1, 9)
+    expect { workbook.insert_rows(1) }.to raise_error(Rukbat::Error, /sheet limit/)
+    expect(workbook.sheet.row_count).to eq(Rukbat::Workbook::MAX_ROWS)
+    expect(workbook.input_at(Rukbat::Workbook::MAX_ROWS, 1)).to eq(9)
+    expect(workbook.input_at(Rukbat::Workbook::MAX_ROWS + 1, 1)).to be_nil
+
+    workbook.set(1, Rukbat::Workbook::MAX_COLUMNS, 9)
+    expect { workbook.insert_columns(1) }.to raise_error(Rukbat::Error, /sheet limit/)
+    expect(workbook.sheet.column_count).to eq(Rukbat::Workbook::MAX_COLUMNS)
+    expect(workbook.input_at(1, Rukbat::Workbook::MAX_COLUMNS + 1)).to be_nil
+  end
+end
+
+RSpec.describe Rukbat::CSVFile do
+  it "imports Shift_JIS CSV without corrupting Japanese text and writes UTF-8 CSV" do
+    Dir.mktmpdir do |directory|
+      input = File.join(directory, "input.csv")
+      output = File.join(directory, "output.csv")
+      File.binwrite(input, "商品,価格\r\nりんご,120\r\n合計,=B2*2\r\n".encode(Encoding::Windows_31J))
+
+      workbook = described_class.read(input)
+      expect(workbook[1, 1]).to eq("商品")
+      expect(workbook[2, 1]).to eq("りんご")
+      expect(workbook[2, 2]).to eq(120)
+      expect(workbook[3, 2]).to eq(240)
+      workbook.set(3, 2, "=B2*2")
+      described_class.write(workbook, output)
+      output_text = File.binread(output).force_encoding(Encoding::UTF_8)
+      expect(output_text).to include("りんご,120")
+      expect(output_text).to include(",240")
+    end
+  end
+
+  it "supports tab-delimited files" do
+    Dir.mktmpdir do |directory|
+      path = File.join(directory, "input.tsv")
+      File.binwrite(path, "a\tb\n1\t2\n")
+
+      workbook = described_class.read(path, delimiter: :tsv)
+      expect(workbook[2, 2]).to eq(2)
+    end
+  end
+
+  it "stores empty CSV fields as sparse blank cells" do
+    Dir.mktmpdir do |directory|
+      path = File.join(directory, "sparse.csv")
+      File.write(path, "name,value\nitem,\n")
+
+      workbook = described_class.read(path)
+      expect(workbook.input_at(2, 2)).to be_nil
+      expect(workbook.sheet.cell_count).to eq(3)
+    end
+  end
+
+  it "does not overwrite a CSV changed by another process" do
+    Dir.mktmpdir do |directory|
+      path = File.join(directory, "shared.csv")
+      File.write(path, "original")
+      digest = Digest::SHA256.file(path).hexdigest
+      File.write(path, "external edit")
+
+      expect { described_class.write(Rukbat::Workbook.new, path, expected_digest: digest) }
+        .to raise_error(Rukbat::Error, /changed since it was loaded/)
+      expect(File.read(path)).to eq("external edit")
+    end
+  end
+
+  it "parses blank, integer, decimal, formula, and text cell input" do
+    expect(described_class.parse_cell("")).to be_nil
+    expect(described_class.parse_cell("42")).to eq(42)
+    expect(described_class.parse_cell("1.25")).to eq(1.25)
+    expect(described_class.parse_cell("=A1+1")).to eq("=A1+1")
+    expect(described_class.parse_cell("001")).to eq("001")
+    expect(described_class.parse_cell("1e999")).to eq("1e999")
+  end
+
+  it "tracks the imported file digest and rejects external changes on save" do
+    Dir.mktmpdir do |directory|
+      path = File.join(directory, "book.csv")
+      File.write(path, "1,2\n")
+      workbook = described_class.read(path)
+      workbook.set(1, 1, 3)
+      File.write(path, "outside edit\n")
+
+      expect { described_class.write(workbook, path) }.to raise_error(Rukbat::Error, /changed since it was loaded/)
+      expect(File.read(path)).to eq("outside edit\n")
+    end
+  end
+
+  it "refuses to replace a file that appeared after an unsaved workbook was created" do
+    Dir.mktmpdir do |directory|
+      path = File.join(directory, "book.csv")
+      workbook = Rukbat::Workbook.new
+      File.write(path, "outside edit\n")
+
+      expect { described_class.write(workbook, path) }.to raise_error(Rukbat::Error, /appeared since/)
+      expect(File.read(path)).to eq("outside edit\n")
+    end
+  end
+end
+
+RSpec.describe Rukbat::GridView do
+  it "renders only a viewport from a million-row by sixteen-thousand-column grid" do
+    view = described_class.new(Rukbat::Workbook.new)
+    app = Zaniah::App.new
+    window = app.open_window(backend: :headless, width: 640, height: 360) { view }
+    begin
+      window.tick
+
+      expect(view.grid.visible_rows.size).to be_between(1, 40)
+      expect(view.grid.visible_columns.size).to be_between(1, 20)
+      expect(view.grid.accessibility_node(nil).states).to include(rows: Rukbat::Workbook::MAX_ROWS + 1,
+        columns: Rukbat::Workbook::MAX_COLUMNS + 1)
+    ensure
+      window.close
+      app.executor.shutdown
+    end
+  end
+
+  it "completes function names and applies numeric formula-bar edits" do
+    view = described_class.new(Rukbat::Workbook.new)
+    app = Zaniah::App.new
+    window = app.open_window(backend: :headless) { view }
+    begin
+      window.tick
+      view.formula_field.buffer.replace(0...view.formula_field.buffer.bytesize, "=SU")
+      view.__send__(:update_completion, "=SU")
+
+      expect(view.completion_candidate).to eq("SUM")
+      view.__send__(:apply_completion)
+      expect(view.formula_field.value).to eq("=SUM")
+      view.formula_field.buffer.replace(0...view.formula_field.buffer.bytesize, "12")
+      expect(view.apply_edit).to be(true)
+      expect(view.instance_variable_get(:@workbook)[1, 1]).to eq(12)
+    ensure
+      window.close
+      app.executor.shutdown
+    end
+  end
+
+  it "fills a repeated source pattern and translates relative formulas in one step" do
+    workbook = Rukbat::Workbook.new
+    workbook.set(1, 1, 2)
+    workbook.set(1, 2, "=A1+1")
+    view = described_class.new(workbook)
+    source = Zaniah::UI::Grid::Area.new(rows: 1...2, columns: 1...3)
+    target = Zaniah::UI::Grid::Area.new(rows: 1...2, columns: 1...5)
+    view.__send__(:fill, source, target)
+
+    expect(workbook[1, 3]).to eq(2)
+    expect(workbook.formula(1, 4)).to eq("=C1+1")
+    expect(workbook[1, 4]).to eq(3)
+    expect(workbook.undo).to be(true)
+    expect(workbook[1, 3]).to be_nil
+    expect(workbook[1, 4]).to be_nil
+  end
+end
+
+RSpec.describe Rukbat::Application do
+  it "saves a new workbook without replacing a path that appeared later" do
+    Dir.mktmpdir do |directory|
+      path = File.join(directory, "new.csv")
+      workbook = Rukbat::Workbook.new
+      workbook.set(1, 1, "hello")
+      app = described_class.new(workbook: workbook, path: path, backend: :headless)
+      expect(app.save).to eq("Saved new.csv")
+      expect(File.read(path)).to eq("hello\r\n")
+      workbook.set(1, 1, "updated")
+      expect(app.save).to eq("Saved new.csv")
+      expect(File.read(path)).to eq("updated\r\n")
+    end
+  end
+end

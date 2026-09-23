@@ -23,6 +23,46 @@ module Rukbat
       @undo_button = UI::Button.new("Undo", size: :sm, variant: :ghost).on_click { undo }
       @redo_button = UI::Button.new("Redo", size: :sm, variant: :ghost).on_click { redo }
       @add_sheet_button = UI::Button.new("+ Sheet", size: :sm, variant: :secondary).on_click { add_sheet }
+      @number_button = UI::Button.new("#,##0.00", size: :sm, variant: :ghost).on_click { apply_format(number_format: "#,##0.00") }
+      @percent_button = UI::Button.new("%", size: :sm, variant: :ghost).on_click { apply_format(number_format: "0.00%") }
+      @bold_button = UI::Button.new("Bold", size: :sm, variant: :ghost).on_click { toggle_bold }
+      @fill_button = UI::Button.new("Fill", size: :sm, variant: :ghost).on_click { apply_format(background: "#FFF2CC") }
+      @freeze_button = UI::Button.new("Freeze", size: :sm, variant: :ghost).on_click { freeze_panes }
+      @line_chart_button = UI::Button.new("Line", size: :sm, variant: :ghost).on_click { show_chart(:line) }
+      @bar_chart_button = UI::Button.new("Bar", size: :sm, variant: :ghost).on_click { show_chart(:bar) }
+      @pie_chart_button = UI::Button.new("Pie", size: :sm, variant: :ghost).on_click { show_chart(:pie) }
+      @font_down_button = UI::Button.new("A−", size: :sm, variant: :ghost).on_click { change_font_size(-1) }
+      @font_up_button = UI::Button.new("A+", size: :sm, variant: :ghost).on_click { change_font_size(1) }
+      @align_button = UI::Button.new("Align", size: :sm, variant: :ghost).on_click { cycle_alignment }
+      @text_color_button = UI::Button.new("Text color", size: :sm, variant: :ghost).on_click { apply_format(color: "#C00000") }
+      @border_button = UI::Button.new("Border", size: :sm, variant: :ghost).on_click do
+        apply_format(border_color: "#7F8793", border_width: 1)
+      end
+      @sort_button = UI::Button.new("Sort ↑", size: :sm, variant: :ghost).on_click { sort_selection }
+      @filter_field = UI::TextField.new("")
+      @filter_button = UI::Button.new("Filter", size: :sm, variant: :ghost).on_click { apply_filter }
+      @clear_filter_button = UI::Button.new("Show all", size: :sm, variant: :ghost).on_click { clear_filter }
+      @remove_duplicates_button = UI::Button.new("Unique", size: :sm, variant: :ghost).on_click { remove_duplicates }
+      @hide_rows_button = UI::Button.new("Hide rows", size: :sm, variant: :ghost).on_click { hide_selected_rows }
+      @hide_columns_button = UI::Button.new("Hide cols", size: :sm, variant: :ghost).on_click { hide_selected_columns }
+      @show_hidden_button = UI::Button.new("Show hidden", size: :sm, variant: :ghost).on_click { show_hidden }
+      @insert_row_button = UI::Button.new("Insert row", size: :sm, variant: :ghost).on_click { edit_structure(:insert_rows) }
+      @delete_rows_button = UI::Button.new("Delete rows", size: :sm, variant: :ghost).on_click { edit_structure(:delete_rows) }
+      @insert_column_button = UI::Button.new("Insert col", size: :sm, variant: :ghost).on_click { edit_structure(:insert_columns) }
+      @delete_columns_button = UI::Button.new("Delete cols", size: :sm, variant: :ghost).on_click { edit_structure(:delete_columns) }
+      @find_field = UI::TextField.new("")
+      @replace_field = UI::TextField.new("")
+      @find_button = UI::Button.new("Find", size: :sm, variant: :ghost).on_click { find_selection }
+      @replace_button = UI::Button.new("Replace", size: :sm, variant: :ghost).on_click { replace_selection }
+      @comment_field = UI::TextField.new("")
+      @comment_button = UI::Button.new("Comment", size: :sm, variant: :ghost).on_click { save_comment }
+      @name_field = UI::TextField.new("")
+      @name_button = UI::Button.new("Name range", size: :sm, variant: :ghost).on_click { name_selection }
+      @highlight_button = UI::Button.new("> 0", size: :sm, variant: :ghost).on_click { highlight_positive }
+      @sort_ascending = true
+      @filter_hidden_rows = []
+      @applied_hidden_rows = []
+      @applied_hidden_columns = []
       @grid = UI::Grid.new(rows: Workbook::MAX_ROWS + 1, columns: Workbook::MAX_COLUMNS + 1,
         row_height: 24, column_width: ->(index) { index.zero? ? 52 : 112 },
         frozen_rows: 1, frozen_columns: 1) do |row, column, _bounds, _cx|
@@ -31,6 +71,7 @@ module Rukbat
       @grid.on_select { |areas, _event, cx| selection_changed(areas, cx) }
       @grid.on_edit { |row, column, _event, cx| begin_edit(row, column, cx) }
       @grid.on_fill { |source, target, _cx| fill(source, target) }
+      sync_grid_visibility
       sync_formula_field
     end
 
@@ -38,11 +79,31 @@ module Rukbat
       @cx = cx
       toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
         .child(@undo_button).child(@redo_button).child(@save_button).child(@add_sheet_button)
+        .child(@number_button).child(@percent_button).child(@bold_button).child(@fill_button)
+        .child(@freeze_button).child(@line_chart_button).child(@bar_chart_button).child(@pie_chart_button)
+      format_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
+        .child(@font_down_button).child(@font_up_button).child(@align_button)
+        .child(@text_color_button).child(@border_button)
+      data_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
+        .child(@sort_button).child(@remove_duplicates_button)
+        .child(@filter_field.style(width: 120)).child(@filter_button).child(@clear_filter_button)
+        .child(@hide_rows_button).child(@hide_columns_button).child(@show_hidden_button)
+      structure_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
+        .child(@insert_row_button).child(@delete_rows_button)
+        .child(@insert_column_button).child(@delete_columns_button)
+      annotation_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
+        .child(@highlight_button).child(@comment_field.style(width: 150)).child(@comment_button)
+        .child(@name_field.style(width: 120)).child(@name_button)
+      find_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
+        .child(@find_field.style(width: 140)).child(@find_button)
+        .child(@replace_field.style(width: 140)).child(@replace_button)
       sheets = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
       @workbook.sheet_names.each do |name|
         variant = name == @workbook.active_sheet ? :secondary : :ghost
         sheets.child(UI::Button.new(name, size: :sm, variant: variant).on_click do
+          clear_filter
           @workbook.activate(name)
+          sync_grid_visibility
           sync_formula_field
           update_status
         end)
@@ -55,19 +116,25 @@ module Rukbat
         .child(@apply_button)
       status_row = Zaniah::Div.new.flex_row.items_center.style(justify_content: :space_between)
         .child(UI::Label.new(@status, tone: :muted, size: :sm)).child(sheets)
-      Zaniah::Div.new.flex_col.gap(cx.theme.spacing[1]).p(cx.theme.spacing[2])
+      content = Zaniah::Div.new.flex_col.gap(cx.theme.spacing[1]).p(cx.theme.spacing[2])
         .style(width: percent(100), height: percent(100))
-        .child(toolbar).child(formula_row).child(@grid.flex_1).child(status_row)
+        .child(toolbar).child(format_toolbar).child(data_toolbar).child(structure_toolbar).child(annotation_toolbar)
+        .child(find_toolbar).child(formula_row).child(@grid.flex_1)
+      content.child(@chart_component) if @chart_component
+      content.child(status_row)
+      content
     end
 
     def undo
       @status = @workbook.undo ? "Undone" : "Nothing to undo"
+      sync_grid_visibility
       sync_formula_field
       request_frame
     end
 
     def redo
       @status = @workbook.redo ? "Redone" : "Nothing to redo"
+      sync_grid_visibility
       sync_formula_field
       request_frame
     end
@@ -103,15 +170,236 @@ module Rukbat
 
     private
 
-    def render_cell(row, column)
-      value = if row.zero?
-        column.zero? ? "" : column_name(column)
-      elsif column.zero?
-        row.to_s
-      else
-        @workbook[row, column]
+    def sort_selection
+      clear_filter
+      top, left, bottom, right = selected_coordinates
+      by = left
+      @workbook.sort(top, left, bottom, right, by: by, ascending: @sort_ascending)
+      @sort_ascending = !@sort_ascending
+      @sort_button.text = @sort_ascending ? "Sort ↑" : "Sort ↓" if @sort_button.respond_to?(:text=)
+      @status = "Sorted #{cell_address(top, left)}:#{cell_address(bottom, right)}"
+      sync_formula_field
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def apply_filter
+      top, left, bottom, = selected_coordinates
+      clear_filter
+      return true if top > bottom
+
+      rows = @workbook.filter_rows(top, bottom, by: left, query: @filter_field.value)
+      matching = rows.to_h { |row| [row, true] }
+      @filter_hidden_rows = (top..bottom).reject { |row| matching.key?(row) }
+      @grid.hide_rows(@filter_hidden_rows, hidden: true) unless @filter_hidden_rows.empty?
+      @status = "Showing #{rows.length} matching rows"
+      request_frame
+      true
+    rescue Rukbat::Error, ArgumentError => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def clear_filter
+      @grid.hide_rows(@filter_hidden_rows, hidden: false) unless @filter_hidden_rows.empty?
+      @filter_hidden_rows = []
+      sync_grid_visibility
+      @status = "Filter cleared"
+      request_frame
+      true
+    end
+
+    def remove_duplicates
+      clear_filter
+      top, left, bottom, right = selected_coordinates
+      removed = @workbook.remove_duplicates(top, left, bottom, right)
+      sync_grid_visibility
+      sync_formula_field
+      @status = "Removed #{removed} duplicate rows"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def find_selection
+      top, left, bottom, right = selected_coordinates
+      matches = @workbook.find(@find_field.value, top: top, left: left, bottom: bottom, right: right)
+      @grid.selection = matches.map do |reference|
+        UI::Grid::Area.new(rows: reference.row...(reference.row + 1),
+          columns: reference.column...(reference.column + 1))
       end
-      UI::Label.new(value.to_s, size: :sm, wrap: :none)
+      @active_cell = [matches.first.row, matches.first.column] unless matches.empty?
+      sync_formula_field unless matches.empty?
+      @status = "Found #{matches.length} cells"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def replace_selection
+      top, left, bottom, right = selected_coordinates
+      count = @workbook.replace_all(@find_field.value, @replace_field.value,
+        top: top, left: left, bottom: bottom, right: right)
+      sync_formula_field
+      @status = "Replaced #{count} cells"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def save_comment
+      @workbook.set_comment(*@active_cell, @comment_field.value)
+      @status = "Comment saved for #{cell_address(*@active_cell)}"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def name_selection
+      top, left, bottom, right = selected_coordinates
+      @workbook.define_name(@name_field.value, top, left, bottom, right)
+      @status = "Named range #{@name_field.value}"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def change_font_size(delta)
+      current = @workbook.format_at(*@active_cell).fetch(:font_size, 12)
+      apply_format(font_size: (current + delta).clamp(6, 72))
+    end
+
+    def cycle_alignment
+      current = @workbook.format_at(*@active_cell).fetch(:horizontal_alignment, :left)
+      alignment = {left: :center, center: :right, right: :left}.fetch(current, :left)
+      apply_format(horizontal_alignment: alignment)
+    end
+
+    def hide_selected_rows
+      top, _left, bottom, = selected_coordinates
+      @workbook.hide_rows(top, bottom)
+      sync_grid_visibility
+      @status = "Hidden rows #{top}-#{bottom}"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def hide_selected_columns
+      _top, left, _bottom, right = selected_coordinates
+      @workbook.hide_columns(left, right)
+      sync_grid_visibility
+      @status = "Hidden columns #{left}-#{right}"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def show_hidden
+      clear_filter
+      @workbook.clear_hidden(:rows)
+      @workbook.clear_hidden(:columns)
+      sync_grid_visibility
+      @status = "All rows and columns are visible"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def edit_structure(operation)
+      top, left, bottom, right = selected_coordinates
+      if operation == :insert_rows || operation == :delete_rows
+        start = top
+        count = operation == :insert_rows ? 1 : bottom - top + 1
+      else
+        start = left
+        count = operation == :insert_columns ? 1 : right - left + 1
+      end
+      @workbook.public_send(operation, start, count)
+      sync_grid_visibility
+      sync_formula_field
+      @status = "#{operation.to_s.tr('_', ' ').capitalize} at #{start} (#{count})"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def sync_grid_visibility
+      @grid.hide_rows(@applied_hidden_rows, hidden: false) unless @applied_hidden_rows.empty?
+      @grid.hide_columns(@applied_hidden_columns, hidden: false) unless @applied_hidden_columns.empty?
+      @applied_hidden_rows = @workbook.hidden_rows
+      @applied_hidden_columns = @workbook.hidden_columns
+      @grid.hide_rows(@applied_hidden_rows, hidden: true) unless @applied_hidden_rows.empty?
+      @grid.hide_columns(@applied_hidden_columns, hidden: true) unless @applied_hidden_columns.empty?
+    end
+
+    def highlight_positive
+      top, left, bottom, right = selected_coordinates
+      @workbook.add_conditional_format(top, left, bottom, right, operator: :greater_than,
+        value: 0, style: {color: "#008000"})
+      @status = "Added positive-value highlight"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    private
+
+    def render_cell(row, column)
+      return UI::Label.new(column.zero? ? "" : column_name(column), size: :sm, wrap: :none) if row.zero?
+      return UI::Label.new(row.to_s, size: :sm, wrap: :none) if column.zero?
+
+      text, style = @workbook.presentation_at(row, column)
+      font = if style[:font_family] || style[:bold] || style[:italic]
+        @cx.text_system&.font_db&.find(family: style[:font_family],
+          weight: style[:bold] ? 700 : 400, style: style[:italic] ? :italic : :normal)
+      end
+      alignment = {left: :start, center: :center, right: :end}.fetch(style[:horizontal_alignment], :start)
+      vertical = {top: :start, middle: :center, bottom: :end}.fetch(style[:vertical_alignment], :center)
+      content = Zaniah::Text.new(text, size: style[:font_size] || 12, color: style[:color] || @cx.theme.colors.text,
+        font: font, wrap: :none, align: alignment)
+      cell = Zaniah::Div.new.flex_row.w_full.h_full.p([1, 4])
+        .style(align_items: vertical, background: style[:background] || "#0000",
+          border: style[:border_width] || 0, border_color: style[:border_color])
+        .child(content)
+      comment = @workbook.comment_at(row, column)
+      cell.tooltip(comment) if comment
+      cell
     rescue Rukbat::Error
       UI::Label.new("", size: :sm)
     end
@@ -171,29 +459,7 @@ module Rukbat
     def translated_formula(value, from_row, from_column, to_row, to_column)
       from = Furud::Reference.new(sheet: @workbook.active_sheet, row: from_row, column: from_column)
       to = Furud::Reference.new(sheet: @workbook.active_sheet, row: to_row, column: to_column)
-      ast = Furud::Formula.parse(value, origin: from)
-      invalid_reference = false
-      Furud::Formula.visit(ast) do |node|
-        next unless %i[reference qualified_reference].include?(node.type)
-
-        reference = node.value
-        row = reference.absolute_row ? reference.row : to.row + reference.row - from.row
-        column = reference.absolute_column ? reference.column : to.column + reference.column - from.column
-        invalid_reference ||= !row.between?(1, Workbook::MAX_ROWS) || !column.between?(1, Workbook::MAX_COLUMNS)
-      end
-      return "=#REF!" if invalid_reference
-
-      translated = Furud::Formula.translate(ast, from: from, to: to)
-      invalid_reference = Furud::Formula.references(translated).any? do |reference|
-        if reference.is_a?(Furud::Reference)
-          !reference.row.between?(1, Workbook::MAX_ROWS) || !reference.column.between?(1, Workbook::MAX_COLUMNS)
-        else
-          reference.top < 1 || reference.left < 1 || reference.bottom > Workbook::MAX_ROWS || reference.right > Workbook::MAX_COLUMNS
-        end
-      end
-      invalid_reference ? "=#REF!" : Furud::Formula.render(translated, origin: to)
-    rescue Furud::ParseError, ArgumentError
-      value
+      @workbook.translate_formula(value, from: from, to: to)
     end
 
     def update_status(area = @grid.selection.last)
@@ -210,6 +476,8 @@ module Rukbat
     def sync_formula_field
       value = @workbook.input_at(*@active_cell).to_s
       @formula_field.buffer.replace(0...@formula_field.buffer.bytesize, value.encode(Encoding::UTF_8))
+      comment = @workbook.comment_at(*@active_cell).to_s
+      @comment_field.buffer.replace(0...@comment_field.buffer.bytesize, comment.encode(Encoding::UTF_8))
       update_completion(value)
     end
 
@@ -236,11 +504,97 @@ module Rukbat
       request_frame
     end
 
+    def apply_format(**properties)
+      coordinates = selected_coordinates
+      @workbook.format_range(*coordinates, sheet: @workbook.active_sheet, **properties)
+      @status = "Formatted #{cell_address(coordinates[0], coordinates[1])}"
+      request_frame
+      true
+    rescue Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def toggle_bold
+      value = !@workbook.format_at(*@active_cell).fetch(:bold, false)
+      apply_format(bold: value)
+    end
+
+    def freeze_panes
+      @grid.freeze_panes(rows: @active_cell[0], columns: @active_cell[1])
+      @status = "Frozen through #{cell_address(*@active_cell)}"
+      request_frame
+      true
+    end
+
+    def show_chart(type)
+      top, left, bottom, right = selected_coordinates
+      if bottom == top
+        @status = "Select a header and at least one data row"
+        request_frame
+        return false
+      end
+      series = chart_series(top, left, bottom, right)
+      @chart_component = case type
+      when :line then UI::LineChart.new(series, width: 480, height: 180)
+      when :bar then UI::BarChart.new(series, width: 480, height: 180)
+      when :pie then UI::PieChart.new(pie_values(top, left, bottom, right), width: 320, height: 180)
+      else raise ArgumentError, "unsupported chart type"
+      end
+      @status = "#{type.to_s.capitalize} chart"
+      request_frame
+      true
+    rescue ArgumentError, Rukbat::Error => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def selected_coordinates
+      area = @grid.selection.last
+      return [*@active_cell, *@active_cell] unless area
+
+      top, left = [area.rows.begin, 1].max, [area.columns.begin, 1].max
+      bottom, right = [area.rows.end - 1, top].max, [area.columns.end - 1, left].max
+      [top, left, bottom, right]
+    end
+
+    def chart_series(top, left, bottom, right)
+      columns = left == right ? [left] : ((left + 1)..right).to_a
+      raise ArgumentError, "select at least one numeric series column" if columns.empty?
+
+      columns.to_h do |column|
+        name = @workbook.input_at(top, column).to_s
+        name = "Series #{column_name(column)}" if name.empty?
+        values = ((top + 1)..bottom).map do |row|
+          value = @workbook[row, column]
+          value.nil? ? 0 : Float(value)
+        rescue ArgumentError, TypeError
+          0
+        end
+        [name, values]
+      end
+    end
+
+    def pie_values(top, left, bottom, right)
+      column = right > left ? left + 1 : left
+      (top + 1..bottom).to_h do |row|
+        label = right > left ? @workbook[row, left].to_s : row.to_s
+        value = @workbook[row, column]
+        number = value.nil? ? 0 : Float(value)
+        [label.empty? ? row.to_s : label, number]
+      rescue ArgumentError, TypeError
+        [label.empty? ? row.to_s : label, 0]
+      end
+    end
+
     def add_sheet
       index = @workbook.sheet_names.length + 1
       name = "Sheet#{index}"
       index += 1 while @workbook.sheet_names.include?(name)
       @workbook.add_sheet(name)
+      sync_grid_visibility
       @active_cell = [1, 1]
       sync_formula_field
       @status = "Added #{name}"

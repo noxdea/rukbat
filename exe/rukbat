@@ -1,0 +1,37 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "optparse"
+require "rukbat"
+
+begin
+options = {delimiter: :comma}
+parser = OptionParser.new do |opts|
+  opts.banner = "Usage: rukbat [options] FILE.csv|FILE.tsv"
+  opts.on("-t", "--tsv", "Use tab-separated values") { options[:delimiter] = :tsv }
+  opts.on("--export-pdf PATH", "Write the workbook as PDF and exit") { |path| options[:pdf] = path }
+  opts.on("--font PATH", "TrueType font to embed in PDF output") { |path| options[:font] = path }
+  opts.on("-v", "--version", "Print version") { puts Rukbat::VERSION; exit }
+  opts.on("-h", "--help", "Show help") { puts opts; exit }
+end
+parser.parse!
+abort parser.to_s unless ARGV.length == 1
+
+path = File.expand_path(ARGV.fetch(0))
+delimiter = options[:delimiter] == :tsv || File.extname(path).downcase == ".tsv" ? :tsv : :comma
+workbook = File.file?(path) ? Rukbat::CSVFile.read(path, delimiter: delimiter) : Rukbat::Workbook.new
+if options[:pdf]
+  abort "--font PATH is required for PDF export" unless options[:font]
+  Rukbat::PDFFile.write(workbook, options[:pdf], font: options[:font])
+  puts "Exported #{File.basename(options[:pdf])}"
+  exit
+end
+Rukbat::Application.new(workbook: workbook, path: path, delimiter: delimiter).run
+rescue OptionParser::ParseError => error
+  warn "rukbat: #{error.message}"
+  warn parser
+  exit 2
+rescue Rukbat::Error, Menkar::Error, SystemCallError => error
+  warn "rukbat: #{error.message}"
+  exit 1
+end

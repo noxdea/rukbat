@@ -1,0 +1,103 @@
+module Rukbat
+  VERSION: String
+
+  class Error < StandardError
+  end
+
+  class CellSource
+    def initialize: (Workbook workbook) -> void
+    def value_at: (Furud::Reference reference) -> untyped
+    def each_in: (Furud::Area area) -> Enumerator[[Furud::Reference, untyped], self]
+              | (Furud::Area area) { (Furud::Reference reference, untyped value) -> void } -> self
+  end
+
+  class Workbook
+    MAX_ROWS: Integer
+    MAX_COLUMNS: Integer
+
+    class Summary
+      attr_reader count: Integer
+      attr_reader numeric_count: Integer
+      attr_reader sum: Numeric
+      attr_reader min: Numeric?
+      attr_reader max: Numeric?
+      attr_reader average: Float?
+      attr_reader types: Hash[Class, Integer]
+    end
+
+    attr_reader active_sheet: String
+
+    def self.from_rows: (Enumerable[Array[untyped]] rows, ?sheet: String) -> Workbook
+    def initialize: (?sheet: String) -> void
+    def sheet_names: () -> Array[String]
+    def sheet: (?String name) -> Denebola::Sheet
+    def activate: (String name) -> String
+    def add_sheet: (String name) -> String
+    def remove_sheet: (String name) -> self
+    def []: (Integer row, Integer column, ?sheet: String) -> untyped
+    def input_at: (Integer row, Integer column, ?sheet: String?) -> untyped
+    def formula: (Integer row, Integer column, ?sheet: String) -> String?
+    def set: (Integer row, Integer column, untyped value, ?sheet: String) -> self
+    def set_many: (Enumerable[Array[untyped]] changes, ?sheet: String) -> self
+    def clear: (Integer row, Integer column, ?sheet: String) -> self
+    def each_in: (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> Enumerator[[Furud::Reference, untyped], self]
+              | (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) { (Furud::Reference reference, untyped value) -> void } -> self
+    def summary: (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> Summary
+    def define_name: (String name, Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> Furud::Area
+    def find: (String query, ?top: Integer, ?left: Integer, ?bottom: Integer, ?right: Integer, ?sheet: String) -> Array[Furud::Reference]
+    def filter_rows: (Integer top, Integer bottom, by: Integer, query: String, ?sheet: String) -> Array[Integer]
+    def replace_all: (String query, String replacement, ?top: Integer, ?left: Integer, ?bottom: Integer, ?right: Integer, ?sheet: String) -> Integer
+    def sort: (Integer top, Integer left, Integer bottom, Integer right, by: Integer, ?ascending: bool, ?sheet: String) -> self
+    def remove_duplicates: (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> Integer
+    def translate_formula: (String value, from: Furud::Reference, to: Furud::Reference) -> String
+    def format_range: (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String, **untyped properties) -> self
+    def format_at: (Integer row, Integer column, ?sheet: String) -> Hash[Symbol, untyped]
+    def presentation_at: (Integer row, Integer column, ?sheet: String) -> [String, Hash[Symbol, untyped]]
+    def set_comment: (Integer row, Integer column, String? text, ?sheet: String) -> self
+    def comment_at: (Integer row, Integer column, ?sheet: String) -> String?
+    def add_conditional_format: (Integer top, Integer left, Integer bottom, Integer right, operator: Symbol | String, value: untyped, style: Hash[Symbol, untyped], ?sheet: String) -> self
+    def clear_conditional_formats: (?sheet: String) -> self
+    def hide_rows: (Integer top, ?Integer bottom, ?hidden: bool, ?sheet: String) -> self
+    def hide_columns: (Integer left, ?Integer right, ?hidden: bool, ?sheet: String) -> self
+    def row_hidden?: (Integer row, ?sheet: String) -> bool
+    def column_hidden?: (Integer column, ?sheet: String) -> bool
+    def hidden_rows: (?sheet: String) -> Array[Integer]
+    def hidden_columns: (?sheet: String) -> Array[Integer]
+    def clear_hidden: (:rows | :columns axis, ?sheet: String) -> self
+    def insert_rows: (Integer at, ?Integer count, ?sheet: String) -> self
+    def delete_rows: (Integer at, ?Integer count, ?sheet: String) -> self
+    def insert_columns: (Integer at, ?Integer count, ?sheet: String) -> self
+    def delete_columns: (Integer at, ?Integer count, ?sheet: String) -> self
+    def undo: () -> bool
+    def redo: () -> bool
+    def source_digest_for: (String path) -> (String | Symbol)
+  end
+
+  module CSVFile
+    def self.read: (String path, ?delimiter: Symbol | String, ?sheet: String, ?hint: String | Encoding) -> Workbook
+    def self.write: (Workbook workbook, String path, ?delimiter: Symbol | String, ?sheet: String, ?values: Symbol, ?expected_digest: String | Symbol | nil) -> String
+    def self.parse_cell: (String value) -> untyped
+  end
+
+  module PDFFile
+    def self.render: (Workbook workbook, font: untyped, ?sheet: String) -> String
+    def self.write: (Workbook workbook, String path, font: untyped, ?sheet: String) -> String
+  end
+
+  class GridView
+    def initialize: (Workbook workbook, ?on_save: untyped) -> void
+    def undo: () -> bool
+    def redo: () -> bool
+    def handle_shortcut: (untyped event, untyped window) -> bool
+    def apply_edit: () -> bool
+  end
+
+  class Application
+    attr_reader workbook: Workbook
+    attr_reader path: String
+    attr_reader view: GridView
+    def initialize: (workbook: Workbook, path: String, ?delimiter: Symbol, ?backend: Symbol) -> void
+    def run: () -> untyped
+    def save: () -> String
+  end
+end
