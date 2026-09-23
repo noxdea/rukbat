@@ -9,8 +9,11 @@ editing and completion, multi-sheet formulas, range summaries, undo/redo,
 structural row/column edits, formatting, sorting, filtering, duplicate removal,
 find/replace, comments, named ranges, conditional formatting, line/bar/pie
 charts, CSV/TSV import/export, and searchable PDF export. The application is
-still under development and has not been released as `0.1.0`; large-sheet
-recalculation performance and formula compatibility remain under validation.
+still under development and has not been released as `0.1.0`. On arm64 macOS
+with Ruby 4.0.6, the million-row integrated scroll benchmark measured 11.383 ms
+against a 16.67 ms budget, and the 100,000-cell edit/recalculation benchmark
+measured 1.773 s against a 3 s budget. Formula compatibility, public CI, and
+dependency releases remain before the first release.
 
 ## Install
 
@@ -92,5 +95,6 @@ bundle exec rbs -I sig -I "$(bundle info --path furud)/sig" -I "$(bundle info --
 gem build --strict rukbat.gemspec
 ```
 
-The implementation is not yet a `0.1.0` release: check the workplan's M17
-acceptance gate for the remaining compatibility and performance work.
+The implementation is not yet a `0.1.0` release. Local performance gates pass;
+check the workplan's M17 acceptance gate for remaining compatibility, public
+CI, and dependency-release checks.
