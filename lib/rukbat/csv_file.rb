@@ -9,7 +9,8 @@ module Rukbat
     MAX_EXPORT_CELLS = 10_000_000
 
     def read(path, delimiter: :comma, sheet: "Sheet1", hint: nil)
-      bytes = File.binread(path)
+      snapshot = Xamidimura::SourceRevision.read(path)
+      bytes = snapshot.bytes
       detection = Menkar.detect(bytes, hint: hint)
       raise Error, "CSV input is binary" if detection.binary
 
@@ -17,11 +18,13 @@ module Rukbat
       delimiter = delimiter_for(delimiter)
       rows = CSV.parse(text, col_sep: delimiter).map { |row| row.map { |value| value && parse_cell(value) } }
       Workbook.from_rows(rows, sheet: sheet).tap do |workbook|
-        workbook.__send__(:bind_source, path, Digest::SHA256.hexdigest(bytes))
+        workbook.__send__(:bind_source, path, snapshot.digest)
       end
     rescue CSV::MalformedCSVError => error
       raise Error, "invalid CSV: #{error.message}"
     rescue Menkar::Error, SystemCallError => error
+      raise Error, "cannot read CSV: #{error.message}"
+    rescue Xamidimura::Error => error
       raise Error, "cannot read CSV: #{error.message}"
     end
 
@@ -54,7 +57,7 @@ module Rukbat
       end
       workbook.__send__(:bind_source, path, digest.hexdigest)
       path
-    rescue SystemCallError, EncodingError => error
+    rescue Xamidimura::Error, SystemCallError, EncodingError => error
       raise Error, "cannot write CSV: #{error.message}"
     end
 
@@ -99,7 +102,7 @@ module Rukbat
         raise Error, "CSV target must be a regular file" if stat && !stat.file?
         if expected_digest == :absent && stat
           raise Error, "CSV file appeared since the workbook was opened"
-        elsif expected_digest.is_a?(String) && (!stat || Digest::SHA256.file(target).hexdigest != expected_digest)
+        elsif expected_digest.is_a?(String) && (!stat || Xamidimura::SourceRevision.file_digest(target) != expected_digest)
           raise Error, "CSV file changed since it was loaded"
         end
 

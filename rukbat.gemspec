@@ -34,5 +34,6 @@ Gem::Specification.new do |spec|
   spec.add_dependency "menkar", "~> 0.1.0"
   spec.add_dependency "okab", "~> 0.1.0"
   spec.add_dependency "spica", "~> 0.1.0"
+  spec.add_dependency "xamidimura", "~> 0.1.0"
   spec.add_dependency "zaniah", "~> 0.6.0"
 end
