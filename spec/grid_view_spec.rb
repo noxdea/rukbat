@@ -271,6 +271,7 @@ RSpec.describe Rukbat::GridView do
       allow(window).to receive(:request_frame)
       allow(window).to receive(:prompt_for_paths).and_return([font], [file.path])
       view.instance_variable_set(:@cx, double(window: window))
+      file.close
 
       expect(view.__send__(:export_pdf)).to be(true)
       expect(File.binread(file.path)).to start_with("%PDF-1.7\n".b)

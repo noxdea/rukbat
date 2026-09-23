@@ -490,10 +490,10 @@ RSpec.describe Rukbat::Application do
       workbook.set(1, 1, "hello")
       app = described_class.new(workbook: workbook, path: path, backend: :headless)
       expect(app.save).to eq("Saved new.csv")
-      expect(File.read(path)).to eq("hello\r\n")
+      expect(File.binread(path)).to eq("hello\r\n".b)
       workbook.set(1, 1, "updated")
       expect(app.save).to eq("Saved new.csv")
-      expect(File.read(path)).to eq("updated\r\n")
+      expect(File.binread(path)).to eq("updated\r\n".b)
     end
   end
 end
