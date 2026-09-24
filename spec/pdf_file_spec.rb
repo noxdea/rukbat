@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "tempfile"
+require "tmpdir"
 
 RSpec.describe Rukbat::PDFFile do
   let(:font_path) do
@@ -30,6 +31,59 @@ RSpec.describe Rukbat::PDFFile do
     end
   end
 
+  it "records PDF pages as semantic vectors before drawing through Okab" do
+    workbook = Rukbat::Workbook.from_rows([["hello", 123]])
+    vectors = []
+    allow(Okab::ZaniahVector).to receive(:draw).and_wrap_original do |original, page, vector|
+      expect(vector).to be_a(Zaniah::Vector::Document)
+      expect([vector.width, vector.height]).to eq([842, 595])
+      vectors << vector
+      original.call(page, vector)
+    end
+
+    described_class.render(workbook, font: font_path)
+
+    expect(vectors.length).to eq(1)
+    expect(vectors.first.commands).to include(a_kind_of(Zaniah::Vector::Quad), a_kind_of(Zaniah::Vector::GlyphRun))
+  end
+
+  it "keeps the PDF raster close to the recorded UI page" do
+    skip "pdftoppm is unavailable" unless system("pdftoppm", "-v", out: File::NULL, err: File::NULL)
+    workbook = Rukbat::Workbook.from_rows([["Visual", "123"]])
+    workbook.format_range(1, 2, 1, 2, background: "#FFF2CC", border_color: "#123456")
+    raster = nil
+    original_record = Zaniah::Vector.method(:record)
+    allow(Zaniah::Vector).to receive(:record) do |**options, &build|
+      element = build.call
+      window = Zaniah::Platform.open_window(width: options.fetch(:width), height: options.fetch(:height))
+      begin
+        window.text_system = options.fetch(:text_system)
+        window.render(element, clear: "#FFFFFF")
+        raster = window.device.pixels.dup
+      ensure
+        window.text_system = nil
+        window.close
+      end
+      original_record.call(**options) { element }
+    end
+
+    pdf = described_class.render(workbook, font: font_path)
+    Dir.mktmpdir("rukbat-pdf-compare") do |directory|
+      input = File.join(directory, "page.pdf")
+      output = File.join(directory, "page")
+      File.binwrite(input, pdf)
+      expect(system("pdftoppm", "-f", "1", "-l", "1", "-r", "72", "-singlefile", "-png", input, output,
+        out: File::NULL, err: File::NULL)).to be(true)
+      width, height, pixels = Zaniah::PNG.decode(File.binread("#{output}.png"))
+      expect([width, height]).to eq([842, 595])
+      background_offset = (69 * width + 190) * 4
+      expect(pixels.byteslice(background_offset, 3).bytes).to eq([255, 242, 204])
+      expect(raster.byteslice(background_offset, 3).bytes).to eq([255, 242, 204])
+      error = pixels.bytes.zip(raster.bytes).sum { |a, b| (a - b).abs }
+      expect(error.fdiv(pixels.bytesize)).to be < 18
+    end
+  end
+
   it "exports the selected font family plus bold and italic cell styles" do
     workbook = Rukbat::Workbook.from_rows([["styled"]])
     workbook.format_range(1, 1, 1, 1, font_family: "Abel", bold: true, italic: true)
@@ -41,6 +95,26 @@ RSpec.describe Rukbat::PDFFile do
     pdf = described_class.render(workbook, font: font_path, font_db: font_db)
 
     expect(pdf).to include("2 Tr".b, "1 0 0.2 1".b, "0.28 w".b)
+  end
+
+  it "records an explicitly selected cell font in its searchable glyph run" do
+    workbook = Rukbat::Workbook.from_rows([["selected font"]])
+    workbook.format_range(1, 1, 1, 1, font_family: "Abel")
+    face = Zaniah::TextSystem::FontDB::Face.new(path: font_path, index: 0, family: "Abel", families: ["Abel"],
+      weight: 400, width: 5, style: :normal, fixed_pitch: false, tables: [])
+    selected = Okab::Font.load(font_path).face
+    font_db = double(faces: [face])
+    expect(font_db).to receive(:open).with(font_path, index: 0).and_return(selected)
+    vector = nil
+    allow(Okab::ZaniahVector).to receive(:draw).and_wrap_original do |original, page, document|
+      vector = document
+      original.call(page, document)
+    end
+
+    described_class.render(workbook, font: font_path, font_db: font_db)
+
+    run = vector.commands.grep(Zaniah::Vector::GlyphRun).find { |item| item.text.include?("selected font") }
+    expect(run.font).to equal(selected)
   end
 
   it "paginates wide and tall sparse workbooks" do

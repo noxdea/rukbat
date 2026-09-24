@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.0 — 2026-09-24
+
+- Export spreadsheet pages through Zaniah vector recording and Okab PDF drawing while preserving pagination, formatting, and searchable text.
+
 ## 0.3.0 — 2026-09-24
 
 - Add range-based whole-number input validation with undo support.

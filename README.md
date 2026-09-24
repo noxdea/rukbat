@@ -134,7 +134,8 @@ and supply an embeddable font. The command line can export directly:
 rukbat --export-pdf report.pdf --font /path/to/font.ttf sales.csv
 ```
 
-PDF export includes formatted, searchable cell text. Charts are not rendered
+PDF export draws formatted cells from Zaniah's vector recording and keeps text
+searchable in Okab's PDF output. Charts are not rendered
 in PDFs. Print areas reset when the workbook is reopened.
 
 ## Limits

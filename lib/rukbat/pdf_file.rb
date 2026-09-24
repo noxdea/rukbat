@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "tempfile"
+require "zaniah/vector"
+require "okab/zaniah_vector"
 
 module Rukbat
   module PDFFile
@@ -25,14 +27,17 @@ module Rukbat
       columns = area ? area.right - area.left + 1 : [current.column_count, 1].max
       raise Error, "PDF export exceeds #{MAX_CELLS} cells" if rows * columns > MAX_CELLS
 
+      renderer = Zaniah::TextSystem::Renderer.new(font: font.face)
       document = Okab::Document.new(title: "#{sheet} — Rukbat", author: "Yudai Takada", creator: "Rukbat")
       (0...rows).step(ROWS_PER_PAGE) do |row_offset|
         (0...columns).step(COLUMNS_PER_PAGE) do |column_offset|
-          render_page(document, workbook, font, font_db, font_cache, sheet, origin_row, origin_column, row_offset, column_offset,
+          render_page(document, workbook, font, renderer, font_db, font_cache, sheet, origin_row, origin_column, row_offset, column_offset,
             [rows - row_offset, ROWS_PER_PAGE].min, [columns - column_offset, COLUMNS_PER_PAGE].min)
         end
       end
       document.render
+    ensure
+      renderer&.close
     end
 
     def write(workbook, path, font:, sheet: workbook.active_sheet, font_db: nil)
@@ -55,22 +60,35 @@ module Rukbat
       raise Error, "cannot write PDF: #{error.message}"
     end
 
-    def render_page(document, workbook, font, font_db, font_cache, sheet, origin_row, origin_column, row_offset, column_offset, row_count, column_count)
-      document.page(width: PAGE_WIDTH, height: PAGE_HEIGHT) do |page|
-        first_row = origin_row + row_offset + 1
-        last_row = first_row + row_count - 1
-        page.text("#{sheet} — rows #{first_row}-#{last_row}",
-          x: MARGIN, y: PAGE_HEIGHT - MARGIN, font: font, size: 10)
-        data_top = PAGE_HEIGHT - MARGIN - 24
-        (0..row_count).each do |row_index|
-          (0..column_count).each do |column_index|
-            x = MARGIN + (column_index.zero? ? 0 : 38 + (column_index - 1) * CELL_WIDTH)
-            width = column_index.zero? ? 38 : CELL_WIDTH
-            y = data_top - row_index * CELL_HEIGHT
-            text, style = cell_text(workbook, sheet, origin_row, origin_column,
-              row_offset, column_offset, row_index, column_index)
-            paint_cell(page, text, style, font_for_style(style, font, font_db, font_cache), x, y, width)
+    def render_page(document, workbook, font, renderer, font_db, font_cache, sheet, origin_row, origin_column,
+      row_offset, column_offset, row_count, column_count)
+      styled_text = []
+      vector = Zaniah::Vector.record(width: PAGE_WIDTH, height: PAGE_HEIGHT, text_system: renderer) do
+        Zaniah::Canvas.new do |_bounds, cx|
+          scene = cx.scene
+          first_row = origin_row + row_offset + 1
+          last_row = first_row + row_count - 1
+          header = "#{sheet} — rows #{first_row}-#{last_row}"
+          renderer.paint_line(scene, renderer.layout_line(header, font: font.face, size: 10),
+            x: MARGIN, y: MARGIN, color: "#000000")
+          data_top = PAGE_HEIGHT - MARGIN - 24
+          (0..row_count).each do |row_index|
+            (0..column_count).each do |column_index|
+              x = MARGIN + (column_index.zero? ? 0 : 38 + (column_index - 1) * CELL_WIDTH)
+              width = column_index.zero? ? 38 : CELL_WIDTH
+              y = data_top - row_index * CELL_HEIGHT
+              text, style = cell_text(workbook, sheet, origin_row, origin_column,
+                row_offset, column_offset, row_index, column_index)
+              paint_cell(scene, styled_text, renderer, text, style,
+                font_for_style(style, font, font_db, font_cache), x, y, width)
+            end
           end
+        end.w(PAGE_WIDTH).h(PAGE_HEIGHT)
+      end
+      document.page(width: PAGE_WIDTH, height: PAGE_HEIGHT) do |page|
+        Okab::ZaniahVector.draw(page, vector)
+        styled_text.each do |text, x, y, font, size, color, bold, italic|
+          page.text(text, x: x, y: y, font: font, size: size, color: color, bold: bold, italic: italic)
         end
       end
     end
@@ -87,13 +105,11 @@ module Rukbat
     end
     private_class_method :cell_text
 
-    def paint_cell(page, text, style, font, x, top, width)
+    def paint_cell(scene, styled_text, renderer, text, style, font, x, top, width)
       y = top - CELL_HEIGHT
-      if style[:background]
-        page.rect(x, y, width, CELL_HEIGHT).fill(rgb(style[:background]))
-      end
-      page.rect(x, y, width, CELL_HEIGHT).stroke(rgb(style[:border_color] || "#B8BEC8"),
-        width: style[:border_width] || 0.5)
+      scene.quad(x, PAGE_HEIGHT - top, width, CELL_HEIGHT,
+        color: style[:background] || "#0000", border_color: style[:border_color] || "#B8BEC8",
+        border_width: style[:border_width] || 0.5)
       text = text.to_s.lines.first.to_s.chomp
       text = text.encode(Encoding::UTF_8)
       # ponytail: fixed-height PDF rows cap text at 13pt; variable page geometry can lift the ceiling.
@@ -111,8 +127,15 @@ module Rukbat
         when :bottom then y + 2
         else y + (CELL_HEIGHT - size) / 2
         end
-        page.text(text, x: text_x, y: baseline, font: font, size: size,
-          color: rgb(style[:color] || "#20242C"), bold: style[:bold] || false, italic: style[:italic] || false)
+        color = style[:color] || "#20242C"
+        if style[:bold] || style[:italic]
+          # GlyphRun has no synthetic-style fields; retain Okab's searchable
+          # faux-bold/italic text operator for those cells only.
+          styled_text << [text, text_x, baseline, font, size, rgb(color), !!style[:bold], !!style[:italic]]
+        else
+          renderer.paint_line(scene, renderer.layout_line(text, font: font.face, size: size),
+            x: text_x, y: PAGE_HEIGHT - baseline, color: color)
+        end
       end
     end
     private_class_method :paint_cell
