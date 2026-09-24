@@ -75,6 +75,88 @@ RSpec.describe Rukbat::GridView do
     window&.close
   end
 
+  it "applies and clears whole-number rules for the selected range" do
+    workbook = Rukbat::Workbook.new
+    view = described_class.new(workbook)
+    view.grid.selection = [area(2...4, 3...5)]
+    view.validation_min_field.buffer.replace(0...0, "2")
+    view.validation_max_field.buffer.replace(0...0, "8")
+
+    expect(view.__send__(:apply_whole_number_validation)).to be(true)
+    expect(workbook.input_validation_at(2, 3).minimum).to eq(2)
+    expect(workbook.input_validation_at(3, 4).maximum).to eq(8)
+    expect(workbook.input_validation_at(1, 3)).to be_nil
+
+    view.grid.selection = [area(2...3, 3...4)]
+    expect(view.__send__(:clear_input_validation)).to be(true)
+    expect(workbook.input_validation_at(2, 3)).to be_nil
+    expect(workbook.input_validation_at(3, 4).minimum).to eq(2)
+  end
+
+  it "keeps an invalid cell edit active and reports the validation error" do
+    workbook = Rukbat::Workbook.from_rows([[5]])
+    workbook.set_whole_number_validation(1, 1, 1, 1, minimum: 1, maximum: 9)
+    view = described_class.new(workbook)
+    window = Zaniah::Platform::Headless::Window.new(width: 800, height: 600)
+    context = Zaniah::FrameContext.new(window)
+    view.request_layout(context)
+
+    view.__send__(:begin_edit, 1, 1, context)
+    buffer = view.instance_variable_get(:@inline_buffer)
+    buffer.replace(0...buffer.bytesize, "10")
+
+    expect(view.__send__(:commit_inline_edit)).to be(false)
+    expect(view.instance_variable_get(:@editing_cell)).to eq([1, 1])
+    expect(workbook.input_at(1, 1)).to eq(5)
+    expect(view.status).to include("A1", "1 and 9")
+  ensure
+    window&.close
+  end
+
+  it "creates a static pivot sheet from the selected range and supports undo" do
+    workbook = Rukbat::Workbook.from_rows([
+      ["Region", "Sales"], ["East", 10], ["West", 4], ["East", 6]
+    ])
+    view = described_class.new(workbook)
+    view.grid.selection = [area(1...5, 1...3)]
+    view.instance_variable_get(:@pivot_key_field).buffer.replace(0...1, "1")
+    view.instance_variable_get(:@pivot_value_field).buffer.replace(0...1, "2")
+
+    expect(view.__send__(:create_pivot_table)).to be(true)
+    expect(workbook.sheet_names).to eq(["Sheet1", "Pivot"])
+    expect(workbook.active_sheet).to eq("Sheet1")
+    expect(workbook.input_at(1, 1, sheet: "Pivot")).to eq("Region")
+    expect(workbook.input_at(1, 2, sheet: "Pivot")).to eq("Sum of Sales")
+    expect(workbook.input_at(2, 1, sheet: "Pivot")).to eq("East")
+    expect(workbook.input_at(2, 2, sheet: "Pivot")).to eq(16)
+    expect(workbook.input_at(3, 2, sheet: "Pivot")).to eq(4)
+
+    view.undo
+    expect(workbook.sheet_names).to eq(["Sheet1"])
+  end
+
+  it "keeps leading-equals pivot keys as text in the generated sheet" do
+    workbook = Rukbat::Workbook.from_rows([["Key", "Value"], ["placeholder", 3]])
+    workbook.set(2, 1, '="=Group"')
+    view = described_class.new(workbook)
+    view.grid.selection = [area(1...3, 1...3)]
+
+    expect(view.__send__(:create_pivot_table)).to be(true)
+    expect(workbook[2, 1, sheet: "Pivot"]).to eq("=Group")
+  end
+
+  it "keeps pivot output as a static snapshot after source cells change" do
+    workbook = Rukbat::Workbook.from_rows([["Key", "Value"], ["A", 3]])
+    view = described_class.new(workbook)
+    view.grid.selection = [area(1...3, 1...3)]
+
+    expect(view.__send__(:create_pivot_table)).to be(true)
+    workbook.set(2, 2, 99)
+
+    expect(workbook[2, 2, sheet: "Pivot"]).to eq(3)
+    expect(workbook[2, 2, sheet: "Sheet1"]).to eq(99)
+  end
+
   it "writes #REF when formula translation leaves the grid" do
     workbook = Rukbat::Workbook.new
     workbook.set(1, 2, "=A1")
@@ -155,6 +237,19 @@ RSpec.describe Rukbat::GridView do
       expect(view.__send__(:show_chart, :line)).to be(true)
       window.tick
       expect(view.status).to eq("Line chart")
+
+      charts = {
+        bar: Zaniah::UI::BarChart, pie: Zaniah::UI::PieChart, donut: Zaniah::UI::DonutChart,
+        scatter: Zaniah::UI::ScatterChart, area: Zaniah::UI::AreaChart, stacked_area: Zaniah::UI::AreaChart,
+        stacked_bar: Zaniah::UI::StackedBarChart
+      }
+      charts.each do |type, chart_class|
+        expect(view.__send__(:show_chart, type)).to be(true), type.to_s
+        chart = view.instance_variable_get(:@chart_component)
+        expect(chart).to be_a(chart_class), type.to_s
+        expect(chart.points).to eq("Cost" => [[0.25, 0.1], [0.5, 0.2]]) if type == :scatter
+      end
+      expect(view.status).to eq("Stacked bar chart")
     ensure
       window.close
       app.executor.shutdown
@@ -271,6 +366,7 @@ RSpec.describe Rukbat::GridView do
       allow(window).to receive(:request_frame)
       allow(window).to receive(:prompt_for_paths).and_return([font], [file.path])
       view.instance_variable_set(:@cx, double(window: window))
+      file.close
 
       expect(view.__send__(:export_pdf)).to be(true)
       expect(File.binread(file.path)).to start_with("%PDF-1.7\n".b)

@@ -109,7 +109,8 @@ module Rukbat
         mode = stat ? stat.mode & 0o7777 : 0o666 & ~File.umask
         # ponytail: the digest check is advisory; an external writer racing the final rename needs OS-specific compare-and-swap locking.
         file.chmod(mode)
-        File.rename(file.path, target)
+        file.close
+        AtomicFile.install(file.path, target, replace: expected_digest != :absent)
       end
       begin
         File.open(File.dirname(target), "r", &:fsync)

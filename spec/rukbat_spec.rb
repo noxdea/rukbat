@@ -234,6 +234,94 @@ RSpec.describe Rukbat::Workbook do
       count: 4, numeric_count: 3, sum: 60, min: 10, max: 30, average: 20.0)
   end
 
+  it "pivots an explicit range by relative key/value columns using sum or nonblank count" do
+    workbook.set_many([[1, 1, "Region"], [1, 2, "Sales"],
+      [2, 1, "East"], [2, 2, 10], [3, 1, "West"], [3, 2, 4],
+      [4, 1, "East"], [4, 2, "=2*3"], [5, 1, "East"], [5, 2, "n/a"],
+      [6, 1, "West"], [7, 1, "West"], [7, 2, Float::INFINITY],
+      [8, 1, "East"], [8, 2, Float::NAN], [9, 2, 3]])
+
+    pivot = workbook.pivot_table(1, 1, 9, 2, row_key_column: 1, value_column: 2)
+    expect(pivot).to have_attributes(
+      source_area: Furud::Area.new(sheet: "Sheet1", top: 1, left: 1, bottom: 9, right: 2),
+      row_key_column: 1, value_column: 2, aggregate: :sum,
+      headers: ["Region", "Sum of Sales"], rows: [["East", 16], ["West", 4], [nil, 3]])
+
+    counts = workbook.pivot_table(1, 1, 9, 2, row_key_column: 1, value_column: 2, aggregate: :count)
+    expect(counts.aggregate).to eq(:count)
+    expect(counts.headers).to eq(["Region", "Count of Sales"])
+    expect(counts.rows).to eq([["East", 4], ["West", 2], [nil, 1]])
+    expect { workbook.pivot_table(1, 1, 9, 2, row_key_column: 3, value_column: 2) }
+      .to raise_error(Rukbat::Error, /row-key column/)
+  end
+
+  it "writes formula error keys and atomically rejects malformed pivot output" do
+    workbook.set(1, 1, "Key")
+    workbook.set(1, 2, "Value")
+    workbook.set(2, 1, "=1/0")
+    workbook.set(2, 2, 7)
+    pivot = workbook.pivot_table(1, 1, 2, 2, row_key_column: 1, value_column: 2)
+
+    expect(pivot.rows.first.first).to be_a(Furud::ErrorValue)
+    expect(workbook.add_pivot_sheet("Pivot", pivot)).to eq("Pivot")
+    expect(workbook.input_at(2, 1, sheet: "Pivot")).to be_a(Furud::ErrorValue)
+    expect(workbook.undo).to be(true)
+    expect(workbook.sheet_names).to eq(["Sheet1"])
+
+    malformed = Rukbat::Workbook::PivotTable.new(source_area: pivot.source_area,
+      row_key_column: 1, value_column: 2, aggregate: :sum,
+      headers: ["Key", "Sum of Value"], rows: [["missing value"]])
+    expect { workbook.add_pivot_sheet("Broken", malformed) }
+      .to raise_error(Rukbat::Error, /must contain a key and value/)
+    expect(workbook.sheet_names).to eq(["Sheet1"])
+    expect(workbook.redo).to be(true)
+    expect(workbook.sheet_names).to eq(["Sheet1", "Pivot"])
+
+    invalid_aggregate = Rukbat::Workbook::PivotTable.new(source_area: pivot.source_area,
+      row_key_column: 1, value_column: 2, aggregate: :average,
+      headers: ["Key", "Average of Value"], rows: [["A", 7]])
+    expect { workbook.add_pivot_sheet("Invalid", invalid_aggregate) }
+      .to raise_error(Rukbat::Error, /pivot columns are invalid/)
+    expect(workbook.sheet_names).to eq(["Sheet1", "Pivot"])
+  end
+
+  it "rejects pivot sums that overflow to a non-finite value" do
+    workbook.set_many([[1, 1, "Key"], [1, 2, "Value"],
+      [2, 1, "A"], [2, 2, Float::MAX], [3, 1, "A"], [3, 2, Float::MAX]])
+
+    expect { workbook.pivot_table(1, 1, 3, 2, row_key_column: 1, value_column: 2) }
+      .to raise_error(Rukbat::Error, /pivot sum is not finite/)
+    expect(workbook.sheet_names).to eq(["Sheet1"])
+  end
+
+  it "rolls back a pivot sheet when calculation fails during installation" do
+    workbook.set(1, 1, "Key")
+    workbook.set(1, 2, "Value")
+    workbook.set(2, 1, "A")
+    workbook.set(2, 2, 3)
+    pivot = workbook.pivot_table(1, 1, 2, 2, row_key_column: 1, value_column: 2)
+    workbook.set(10, 10, 1)
+    workbook.set(10, 10, 2)
+    workbook.undo
+    engine = workbook.instance_variable_get(:@engine)
+    allow(engine).to receive(:recalculate).and_raise(StandardError, "simulated calculation failure")
+
+    expect { workbook.add_pivot_sheet("Pivot", pivot) }
+      .to raise_error(Rukbat::Error, /simulated calculation failure/)
+    expect(workbook.sheet_names).to eq(["Sheet1"])
+    expect(workbook.summary(1, 1, 2, 2).sum).to eq(3)
+    expect(workbook.redo).to be(true)
+    expect(workbook.input_at(10, 10)).to eq(2)
+  end
+
+  it "rejects pivots that exceed the group limit" do
+    rows = [["Key", "Value"], *Array.new(Rukbat::Workbook::MAX_PIVOT_GROUPS + 1) { |index| ["group#{index}"] }]
+    workbook = described_class.from_rows(rows)
+
+    expect { workbook.pivot_table(1, 1, rows.length, 2, row_key_column: 1, value_column: 2) }
+      .to raise_error(Rukbat::Error, /#{Rukbat::Workbook::MAX_PIVOT_GROUPS} groups/)
+  end
+
   it "preserves and adjusts formula references during row insertion" do
     workbook.set(5, 1, 9)
     workbook.set(1, 2, "=A5")
@@ -254,6 +342,25 @@ RSpec.describe Rukbat::Workbook do
     workbook.set(1, 1, "left")
     workbook.insert_columns(1)
     expect(workbook[1, 2]).to eq("left")
+  end
+
+  it "adjusts formulas inside and outside a sheet during column edits" do
+    workbook.add_sheet("Budget")
+    workbook.set(1, 3, 8, sheet: "Budget")
+    workbook.set(1, 5, "=C1", sheet: "Budget")
+    workbook.set(1, 2, "=Budget!C1", sheet: "Sheet1")
+
+    workbook.insert_columns(2, sheet: "Budget")
+
+    expect(workbook.formula(1, 6, sheet: "Budget")).to eq("=D1")
+    expect(workbook[1, 6, sheet: "Budget"]).to eq(8)
+    expect(workbook.formula(1, 2, sheet: "Sheet1")).to eq("=Budget!D1")
+    expect(workbook[1, 2, sheet: "Sheet1"]).to eq(8)
+
+    workbook.delete_columns(4, sheet: "Budget")
+
+    expect(workbook.formula(1, 5, sheet: "Budget")).to eq("=#REF!")
+    expect(workbook.formula(1, 2, sheet: "Sheet1")).to eq("=#REF!")
   end
 
   it "undoes and redoes edits using persistent sheet snapshots" do
@@ -297,6 +404,86 @@ RSpec.describe Rukbat::Workbook do
     expect(workbook.undo).to be(true)
     expect(workbook[1, 1]).to be_nil
     expect(workbook[1, 2]).to be_nil
+  end
+
+  it "applies rectangular whole-number rules and replaces or clears only selected cells" do
+    workbook.set_whole_number_validation(1, 1, 4, 4, minimum: 1, maximum: 9)
+    workbook.set_whole_number_validation(2, 2, 3, 3, minimum: 10, maximum: 20)
+
+    expect(workbook.input_validation_at(1, 1).minimum).to eq(1)
+    expect(workbook.input_validation_at(2, 2).minimum).to eq(10)
+    expect(workbook.input_validation_at(3, 3).maximum).to eq(20)
+
+    workbook.clear_input_validation(2, 2, 2, 2)
+
+    expect(workbook.input_validation_at(2, 2)).to be_nil
+    expect(workbook.input_validation_at(2, 3).minimum).to eq(10)
+    expect(workbook.input_validation_at(4, 4).maximum).to eq(9)
+  end
+
+  it "bounds the number of range validations" do
+    Rukbat::Workbook::MAX_INPUT_VALIDATIONS.times do |offset|
+      workbook.set_whole_number_validation(1, offset + 1, 1, offset + 1, minimum: 1, maximum: 9)
+    end
+
+    expect { workbook.set_whole_number_validation(1, 257, 1, 257, minimum: 1, maximum: 9) }
+      .to raise_error(Rukbat::Error, /input validation limit/)
+    expect(workbook.input_validation_at(1, 257)).to be_nil
+  end
+
+  it "enforces validation atomically for direct edits, batches, and formula results" do
+    workbook.set_whole_number_validation(1, 2, 1, 2, minimum: 1, maximum: 10)
+    workbook.set(1, 2, 10)
+
+    expect { workbook.set(1, 2, 11) }.to raise_error(Rukbat::Error, /B1.*1 and 10/)
+    expect { workbook.set(1, 2, "text") }.to raise_error(Rukbat::Error, /B1.*whole number/)
+    expect { workbook.set(1, 2, 1.5) }.to raise_error(Rukbat::Error, /B1.*whole number/)
+    expect { workbook.set_many([[2, 1, 8], [1, 2, 12]]) }
+      .to raise_error(Rukbat::Error, /B1.*1 and 10/)
+    expect(workbook.input_at(2, 1)).to be_nil
+
+    workbook.set(1, 1, 5)
+    workbook.set(1, 2, "=A1")
+    expect(workbook[1, 2]).to eq(5)
+    expect { workbook.set(1, 1, 12) }.to raise_error(Rukbat::Error, /B1.*1 and 10/)
+    expect(workbook.input_at(1, 1)).to eq(5)
+    expect(workbook[1, 2]).to eq(5)
+    expect(workbook.summary(1, 1, 1, 2).sum).to eq(10)
+    expect { workbook.set(1, 2, "=11") }.to raise_error(Rukbat::Error, /B1.*1 and 10/)
+  end
+
+  it "keeps validation ranges through undo, redo, and structural edits" do
+    workbook.set_whole_number_validation(2, 1, 3, 2, minimum: -2, maximum: 2)
+
+    expect(workbook.undo).to be(true)
+    expect(workbook.input_validation_at(2, 1)).to be_nil
+    expect(workbook.redo).to be(true)
+    expect(workbook.input_validation_at(3, 2).minimum).to eq(-2)
+
+    workbook.insert_rows(1)
+    expect(workbook.input_validation_at(2, 1)).to be_nil
+    expect(workbook.input_validation_at(3, 1).maximum).to eq(2)
+    expect(workbook.undo).to be(true)
+    expect(workbook.input_validation_at(2, 1).minimum).to eq(-2)
+  end
+
+  it "preserves redo and rolls back structure edits that violate formula validation" do
+    workbook.set_whole_number_validation(1, 2, 1, 2, minimum: 1, maximum: 9)
+    workbook.set(1, 2, 5)
+    workbook.set(1, 2, 6)
+    expect(workbook.undo).to be(true)
+    expect { workbook.set(1, 2, 10) }.to raise_error(Rukbat::Error, /B1.*1 and 9/)
+    expect(workbook.redo).to be(true)
+    expect(workbook.input_at(1, 2)).to eq(6)
+
+    workbook.set(1, 1, 5)
+    workbook.set(2, 2, "=A1")
+    workbook.set_whole_number_validation(2, 2, 2, 2, minimum: 1, maximum: 9)
+    expect { workbook.delete_rows(1) }.to raise_error(Rukbat::Error, /B1.*whole number/)
+    expect(workbook.formula(2, 2)).to eq("=A1")
+    expect(workbook.input_validation_at(2, 2).minimum).to eq(1)
+    expect(workbook.undo).to be(true)
+    expect(workbook.formula(2, 2)).to eq("=A1")
   end
 
   it "validates sheet names and spreadsheet coordinates" do
@@ -490,10 +677,10 @@ RSpec.describe Rukbat::Application do
       workbook.set(1, 1, "hello")
       app = described_class.new(workbook: workbook, path: path, backend: :headless)
       expect(app.save).to eq("Saved new.csv")
-      expect(File.read(path)).to eq("hello\r\n")
+      expect(File.binread(path)).to eq("hello\r\n".b)
       workbook.set(1, 1, "updated")
       expect(app.save).to eq("Saved new.csv")
-      expect(File.read(path)).to eq("updated\r\n")
+      expect(File.binread(path)).to eq("updated\r\n".b)
     end
   end
 end

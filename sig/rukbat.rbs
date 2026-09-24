@@ -14,6 +14,15 @@ module Rukbat
   class Workbook
     MAX_ROWS: Integer
     MAX_COLUMNS: Integer
+    MAX_INPUT_VALIDATIONS: Integer
+    MAX_PIVOT_ROWS: Integer
+    MAX_PIVOT_GROUPS: Integer
+
+    class InputValidation
+      attr_reader area: Furud::Area
+      attr_reader minimum: Integer
+      attr_reader maximum: Integer
+    end
 
     class CellRange
       attr_reader top: Integer
@@ -33,6 +42,15 @@ module Rukbat
       attr_reader types: Hash[Class, Integer]
     end
 
+    class PivotTable
+      attr_reader source_area: Furud::Area
+      attr_reader row_key_column: Integer
+      attr_reader value_column: Integer
+      attr_reader aggregate: :sum | :count
+      attr_reader headers: [String, String]
+      attr_reader rows: Array[[untyped, untyped]]
+    end
+
     attr_reader active_sheet: String
 
     def self.from_rows: (Enumerable[Array[untyped]] rows, ?sheet: String) -> Workbook
@@ -50,9 +68,14 @@ module Rukbat
     def set: (Integer row, Integer column, untyped value, ?sheet: String) -> self
     def set_many: (Enumerable[Array[untyped]] changes, ?sheet: String) -> self
     def clear: (Integer row, Integer column, ?sheet: String) -> self
+    def set_whole_number_validation: (Integer top, Integer left, Integer bottom, Integer right, minimum: Integer, maximum: Integer, ?sheet: String) -> self
+    def clear_input_validation: (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> self
+    def input_validation_at: (Integer row, Integer column, ?sheet: String) -> InputValidation?
     def each_in: (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> Enumerator[[Furud::Reference, untyped], self]
               | (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) { (Furud::Reference reference, untyped value) -> void } -> self
     def summary: (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> Summary
+    def pivot_table: (Integer top, Integer left, Integer bottom, Integer right, row_key_column: Integer, value_column: Integer, ?aggregate: :sum | :count, ?sheet: String) -> PivotTable
+    def add_pivot_sheet: (String name, PivotTable pivot) -> String
     def define_name: (String name, Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> Furud::Area
     def find: (String query, ?top: Integer, ?left: Integer, ?bottom: Integer, ?right: Integer, ?sheet: String) -> Array[Furud::Reference]
     def filter_rows: (Integer top, Integer bottom, by: Integer, query: String, ?sheet: String) -> Array[Integer]
@@ -100,6 +123,8 @@ module Rukbat
   end
 
   class GridView
+    attr_reader validation_min_field: untyped
+    attr_reader validation_max_field: untyped
     def initialize: (Workbook workbook, ?on_save: untyped) -> void
     def undo: () -> bool
     def redo: () -> bool

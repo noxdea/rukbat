@@ -100,6 +100,7 @@ RSpec.describe Rukbat::PDFFile do
     workbook = Rukbat::Workbook.from_rows([["ok"]])
     Tempfile.create(["rukbat-target", ".pdf"]) do |file|
       path = file.path
+      file.close
       expect(described_class.write(workbook, path, font: font_path)).to eq(path)
       expect(File.binread(path)).to start_with("%PDF-1.7\n".b)
     end

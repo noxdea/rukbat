@@ -6,7 +6,7 @@ module Rukbat
     MAX_FILL_CELLS = 100_000
 
     attr_reader :grid, :formula_field, :active_cell, :status, :completion_session,
-      :completion_candidate
+      :completion_candidate, :validation_min_field, :validation_max_field
 
     def initialize(workbook, on_save: nil)
       super()
@@ -37,9 +37,8 @@ module Rukbat
       @freeze_button = UI::Button.new("Freeze", size: :sm, variant: :ghost).on_click { freeze_panes }
       @unfreeze_button = UI::Button.new("Unfreeze", size: :sm, variant: :ghost).on_click { unfreeze_panes }
       @clear_conditional_button = UI::Button.new("Clear highlights", size: :sm, variant: :ghost).on_click { clear_highlights }
-      @line_chart_button = UI::Button.new("Line", size: :sm, variant: :ghost).on_click { show_chart(:line) }
-      @bar_chart_button = UI::Button.new("Bar", size: :sm, variant: :ghost).on_click { show_chart(:bar) }
-      @pie_chart_button = UI::Button.new("Pie", size: :sm, variant: :ghost).on_click { show_chart(:pie) }
+      @chart_dropdown = UI::Dropdown.new("Chart", items: %w[Line Bar Pie Donut Scatter Area Stacked\ area Stacked\ bar])
+        .on_change { |name, *_| show_chart(name.downcase.tr(" ", "_").to_sym) }
       @font_down_button = UI::Button.new("A−", size: :sm, variant: :ghost).on_click { change_font_size(-1) }
       @font_up_button = UI::Button.new("A+", size: :sm, variant: :ghost).on_click { change_font_size(1) }
       @align_button = UI::Button.new("Align", size: :sm, variant: :ghost).on_click { cycle_alignment }
@@ -62,6 +61,19 @@ module Rukbat
       @set_print_area_button = UI::Button.new("Set print area", size: :sm, variant: :ghost).on_click { set_print_area }
       @clear_print_area_button = UI::Button.new("Clear print area", size: :sm, variant: :ghost).on_click { clear_print_area }
       @export_pdf_button = UI::Button.new("Export PDF", size: :sm, variant: :ghost).on_click { export_pdf }
+      @validation_min_field = UI::TextField.new("")
+      @validation_max_field = UI::TextField.new("")
+      @set_validation_button = UI::Button.new("Apply whole-number rule", size: :sm, variant: :ghost)
+        .on_click { apply_whole_number_validation }
+      @clear_validation_button = UI::Button.new("Clear rule", size: :sm, variant: :ghost)
+        .on_click { clear_input_validation }
+      @pivot_key_field = UI::TextField.new("1")
+      @pivot_value_field = UI::TextField.new("2")
+      @pivot_aggregate = :sum
+      @pivot_aggregate_dropdown = UI::Dropdown.new("Sum", items: %w[Sum Count])
+        .on_change { |value, *_| @pivot_aggregate = value.to_s.downcase.to_sym }
+      @create_pivot_button = UI::Button.new("Create pivot", size: :sm, variant: :secondary)
+        .on_click { create_pivot_table }
       @find_field = UI::TextField.new("")
       @replace_field = UI::TextField.new("")
       @find_button = UI::Button.new("Find", size: :sm, variant: :ghost).on_click { find_selection }
@@ -118,7 +130,7 @@ module Rukbat
         .child(@undo_button).child(@redo_button).child(@save_button).child(@add_sheet_button)
         .child(@number_button).child(@percent_button).child(@bold_button).child(@fill_button)
         .child(@freeze_button).child(@unfreeze_button).child(@clear_conditional_button)
-        .child(@line_chart_button).child(@bar_chart_button).child(@pie_chart_button)
+        .child(@chart_dropdown)
       format_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
         .child(@font_down_button).child(@font_up_button).child(@align_button)
         .child(@text_color_button).child(@border_button)
@@ -130,6 +142,16 @@ module Rukbat
         .child(@insert_row_button).child(@delete_rows_button)
         .child(@insert_column_button).child(@delete_columns_button)
         .child(@set_print_area_button).child(@clear_print_area_button).child(@export_pdf_button)
+      validation_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
+        .child(UI::Label.new("Whole numbers", size: :sm))
+        .child(UI::Label.new("Min", size: :sm)).child(@validation_min_field.style(width: 72))
+        .child(UI::Label.new("Max", size: :sm)).child(@validation_max_field.style(width: 72))
+        .child(@set_validation_button).child(@clear_validation_button)
+      pivot_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
+        .child(UI::Label.new("Pivot (selected range; first row is headers)", size: :sm))
+        .child(UI::Label.new("Key col", size: :sm)).child(@pivot_key_field.style(width: 56))
+        .child(UI::Label.new("Value col", size: :sm)).child(@pivot_value_field.style(width: 56))
+        .child(@pivot_aggregate_dropdown).child(@create_pivot_button)
       annotation_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
         .child(@highlight_button).child(@comment_field.style(width: 150)).child(@comment_button)
         .child(@name_field.style(width: 120)).child(@name_button)
@@ -159,7 +181,7 @@ module Rukbat
       content = Zaniah::Div.new.flex_col.gap(cx.theme.spacing[1]).p(cx.theme.spacing[2])
         .style(width: percent(100), height: percent(100))
         .child(toolbar).child(format_toolbar).child(data_toolbar).child(structure_toolbar).child(annotation_toolbar)
-        .child(find_toolbar).child(formula_row).child(@grid.flex_1)
+        .child(validation_toolbar).child(pivot_toolbar).child(find_toolbar).child(formula_row).child(@grid.flex_1)
       content.child(@chart_component) if @chart_component
       content.child(status_row)
       content
@@ -223,6 +245,53 @@ module Rukbat
     end
 
     private
+
+    def apply_whole_number_validation
+      top, left, bottom, right = selected_coordinates
+      minimum = Integer(@validation_min_field.value, 10)
+      maximum = Integer(@validation_max_field.value, 10)
+      @workbook.set_whole_number_validation(top, left, bottom, right,
+        minimum: minimum, maximum: maximum)
+      @status = "Whole-number rule applied to #{cell_address(top, left)}:#{cell_address(bottom, right)}"
+      request_frame
+      true
+    rescue Rukbat::Error, ArgumentError, TypeError => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def clear_input_validation
+      top, left, bottom, right = selected_coordinates
+      @workbook.clear_input_validation(top, left, bottom, right)
+      @status = "Input rule cleared from #{cell_address(top, left)}:#{cell_address(bottom, right)}"
+      request_frame
+      true
+    rescue Rukbat::Error, ArgumentError, TypeError => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def create_pivot_table
+      top, left, bottom, right = selected_coordinates
+      source_cell = @active_cell
+      pivot = @workbook.pivot_table(top, left, bottom, right,
+        row_key_column: Integer(@pivot_key_field.value, 10),
+        value_column: Integer(@pivot_value_field.value, 10), aggregate: @pivot_aggregate)
+      name = @workbook.add_pivot_sheet(next_pivot_sheet_name, pivot)
+      sync_grid_visibility
+      sync_frozen_panes
+      @active_cell = source_cell
+      sync_formula_field
+      @status = "Created #{name}: #{pivot.rows.length} groups (#{pivot.aggregate}); select its sheet tab to view"
+      request_frame
+      true
+    rescue Rukbat::Error, ArgumentError, TypeError => error
+      @status = error.message
+      request_frame
+      false
+    end
 
     def sort_selection
       clear_filter
@@ -750,14 +819,19 @@ module Rukbat
         request_frame
         return false
       end
-      series = chart_series(top, left, bottom, right)
+      series = chart_series(top, left, bottom, right) unless type == :scatter
       @chart_component = case type
       when :line then UI::LineChart.new(series, width: 480, height: 180)
       when :bar then UI::BarChart.new(series, width: 480, height: 180)
       when :pie then UI::PieChart.new(pie_values(top, left, bottom, right), width: 320, height: 180)
+      when :donut then UI::DonutChart.new(pie_values(top, left, bottom, right), width: 320, height: 180)
+      when :scatter then UI::ScatterChart.new(scatter_series(top, left, bottom, right), width: 480, height: 180)
+      when :area then UI::AreaChart.new(series, width: 480, height: 180)
+      when :stacked_area then UI::AreaChart.new(series, width: 480, height: 180, stacked: true)
+      when :stacked_bar then UI::StackedBarChart.new(series, width: 480, height: 180)
       else raise ArgumentError, "unsupported chart type"
       end
-      @status = "#{type.to_s.capitalize} chart"
+      @status = "#{type.to_s.tr("_", " ").capitalize} chart"
       request_frame
       true
     rescue ArgumentError, Rukbat::Error => error
@@ -782,14 +856,35 @@ module Rukbat
       columns.to_h do |column|
         name = @workbook.input_at(top, column).to_s
         name = "Series #{column_name(column)}" if name.empty?
-        values = ((top + 1)..bottom).map do |row|
-          value = @workbook[row, column]
-          value.nil? ? 0 : Float(value)
-        rescue ArgumentError, TypeError
-          0
-        end
+        values = ((top + 1)..bottom).map { |row| chart_value(row, column) }
         [name, values]
       end
+    end
+
+    def scatter_series(top, left, bottom, right)
+      columns = (left..right).to_a
+      first_column_is_labels = ((top + 1)..bottom).none? do |row|
+        Float(@workbook[row, left])
+        true
+      rescue ArgumentError, TypeError
+        false
+      end
+      columns.shift if first_column_is_labels
+      raise ArgumentError, "select X and at least one Y column for a scatter chart" if columns.length < 2
+
+      x_values = ((top + 1)..bottom).map { |row| chart_value(row, columns.first) }
+      columns.drop(1).to_h do |column|
+        name = @workbook.input_at(top, column).to_s
+        name = "Series #{column_name(column)}" if name.empty?
+        [name, ((top + 1)..bottom).map { |row| [x_values[row - top - 1], chart_value(row, column)] }]
+      end
+    end
+
+    def chart_value(row, column)
+      value = @workbook[row, column]
+      value.nil? ? 0 : Float(value)
+    rescue ArgumentError, TypeError
+      0
     end
 
     def pie_values(top, left, bottom, right)
@@ -815,6 +910,14 @@ module Rukbat
       sync_formula_field
       @status = "Added #{name}"
       request_frame
+    end
+
+    def next_pivot_sheet_name
+      return "Pivot" unless @workbook.sheet_names.include?("Pivot")
+
+      index = 2
+      index += 1 while @workbook.sheet_names.include?("Pivot#{index}")
+      "Pivot#{index}"
     end
 
     def save
