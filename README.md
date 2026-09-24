@@ -1,29 +1,75 @@
-# Rukbat
+<h1 align="center">Rukbat</h1>
 
-Rukbat (α Sagittarii), from Arabic *rukbat al-rāmī* (“the archer’s knee”), is
-a spreadsheet application built on a sparse, persistent Denebola sheet and the
-Furud formula engine.
+<p align="center">
+  <strong>Ruby spreadsheet editor with sparse sheets, live formulas, and CSV/TSV workflows</strong>
+</p>
 
-The current implementation includes a virtualized million-row grid, formula
-editing and completion, multi-sheet formulas, range summaries, undo/redo,
-structural row/column edits, formatting, sorting, filtering, duplicate removal,
-find/replace, comments, named ranges, conditional formatting, basic pivot tables, line/bar/pie,
-donut/scatter/area/stacked charts, CSV/TSV import/export, and searchable PDF
-export. On arm64 macOS
-with Ruby 4.0.6, the million-row integrated scroll benchmark measured 11.383 ms
-against a 16.67 ms budget, and the 100,000-cell edit/recalculation benchmark
-measured 1.773 s against a 3 s budget. Formula compatibility, public CI, and
-dependency releases remain before the first release.
+<p align="center">
+  <a href="https://rubygems.org/gems/rukbat"><img src="https://img.shields.io/gem/v/rukbat.svg" alt="Gem version"></a>
+  <a href="https://github.com/noxdea/rukbat/actions/workflows/main.yml"><img src="https://github.com/noxdea/rukbat/actions/workflows/main.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/Ruby-%3E%3D%203.2-cc342d.svg" alt="Ruby 3.2 or newer">
+  <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
+</p>
 
-## Install
+<p align="center">
+  <a href="#features">Features</a> ·
+  <a href="#installation">Installation</a> ·
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#workbook-api">Workbook API</a> ·
+  <a href="#development">Development</a>
+</p>
 
-```ruby
-gem "rukbat"
+---
+
+Rukbat combines [Denebola](https://github.com/noxdea/denebola)'s persistent,
+sparse sheets with [Furud](https://github.com/noxdea/furud)'s formula engine.
+It opens CSV and TSV files in a graphical editor or an interactive terminal,
+and also exposes workbooks as a Ruby API.
+Its name comes from Rukbat (α Sagittarii), Arabic *rukbat al-rāmī*
+(“the archer’s knee”).
+
+## Features
+
+- A virtualized million-row grid with formula editing, completion, multi-sheet references, and range summaries
+- Undo/redo, row and column edits, formatting, sorting, filtering, duplicate removal, find/replace, comments, and named ranges
+- Whole-number input validation, conditional formatting, freeze panes, and static pivot tables
+- Line, bar, pie, donut, scatter, area, and stacked charts in the editor
+- CSV/TSV import and export, plus searchable PDF export with an embedded font
+
+## Installation
+
+Rukbat requires Ruby 3.2 or newer. Install the published gem:
+
+```sh
+gem install rukbat
+rukbat --version
 ```
 
-Rukbat requires Ruby 3.2 or newer.
+Or add `gem "rukbat"` to your Gemfile. The editor needs a supported desktop
+display or an interactive terminal; the workbook API can be used without one.
 
-## Workbooks
+## Quick start
+
+Open a CSV file, start a new one, or select tab-delimited input and output:
+
+```sh
+rukbat sales.csv
+rukbat new.csv
+rukbat --tsv data.tsv
+```
+
+Use the mouse to select cells, arrow keys to move, and Enter or a double-click
+to edit. The formula bar's **Apply** button commits its value. Save with
+Ctrl-S (Cmd-S on macOS); Ctrl-Z/Cmd-Z undoes, and the shifted shortcut redoes.
+The status bar shows the selected range's count, numeric count, sum, and average.
+
+The toolbar provides formats, sorting, filtering, duplicate removal,
+search/replace, comments, named ranges, conditional highlighting, freeze
+panes, print areas, and charts.
+
+## Workbook API
+
+Coordinates and formula references are one-based:
 
 ```ruby
 require "rukbat"
@@ -40,12 +86,28 @@ book.undo
 book.redo
 ```
 
-Workbook coordinates and Furud references are one-based. Denebola storage is
-zero-based internally. Sheets are immutable persistent snapshots, so undo and
-redo retain prior roots instead of copying all cells. The formula engine is
-storage-agnostic; Rukbat adapts sparse range iteration through `CellSource`.
+Denebola stores zero-based, immutable sheet snapshots internally. Undo and
+redo retain prior roots instead of copying every cell; Rukbat feeds sparse
+ranges to Furud through `CellSource`.
 
-## CSV and TSV
+### Validation and pivots
+
+Select a range in the editor, enter inclusive bounds, and choose **Apply
+whole-number rule**. Nonblank edits, including calculated formula results,
+must then be whole numbers within the bounds. Invalid edits are rejected
+atomically; existing values are not changed when a rule is added. **Clear
+rule** removes validation from the selected range. Rules follow structural
+edits and undo/redo, but reset when a CSV/TSV workbook is reopened.
+
+To create a pivot, select a rectangle including its header row, enter the
+one-based key and value column positions within that selection, choose **Sum**
+or **Count**, then **Create pivot**. The result is a static `Pivot` sheet (or
+the next unused `Pivot2`, etc.), not a live link. Formula results are used;
+groups retain first-seen order and match exact key values. Sum accepts finite
+real numbers, while Count counts nonblank values. One Undo removes the
+generated sheet.
+
+## Files and export
 
 ```ruby
 book = Rukbat::CSVFile.read("sales.csv", hint: "Windows-31J")
@@ -53,57 +115,33 @@ Rukbat::CSVFile.write(book, "sales-export.csv")
 Rukbat::CSVFile.read("data.tsv", delimiter: :tsv)
 ```
 
-Import detects and strictly decodes text with Menkar, then infers integer and
-decimal literals while leaving other fields as strings. Export writes UTF-8
-with CRLF row separators; formula cells export their calculated values by
-default. Pass `values: :input` to export stored formulas/inputs instead.
-The application refuses to replace an existing file unless it is the exact
-file read into the workbook and has not changed since loading.
+Import uses [Menkar](https://github.com/noxdea/menkar) to detect and decode
+text, infers integer and decimal literals, and leaves other fields as strings.
+Export writes UTF-8 with CRLF row separators and uses calculated formula
+values by default; pass `values: :input` to export stored formulas. Saving an
+opened file rejects external changes made since it was loaded.
 
-Run `bundle exec rukbat sales.csv` to open the graphical editor. A missing CSV
-path starts a new workbook; `--tsv` selects tab-delimited input and output.
-Use the mouse to select ranges, arrow keys to move, Enter or a double-click to
-edit, and Apply to commit the formula bar value. `Ctrl-S`/`Cmd-S` saves;
-`Ctrl-Z`/`Cmd-Z` undo and the shifted shortcut redoes. The selected range's
-count, numeric count, sum, and average appear in the status bar.
+CSV/TSV saves only the active sheet. Pivot creation leaves the source sheet
+active, so activate the pivot sheet before exporting its summary. Formatting,
+validation rules, print areas, and other workbook metadata are not stored in
+CSV/TSV.
 
-The toolbar provides common number, font, alignment, fill, and border formats;
-sorting, filtering, duplicate removal, search/replace, comments, named ranges,
-positive-value highlighting, freeze/unfreeze panes, print areas, and line, bar,
-pie, donut, scatter, area, stacked-area, and stacked-bar charts.
-Select a range, enter inclusive minimum/maximum values, and choose **Apply whole-number rule**
-to require each nonblank edited value (including a formula's calculated result) to be
-a whole number in that range. Invalid edits are rejected atomically; clearing cells is
-allowed. **Clear rule** removes validation from the selected range, including only the
-selected portion of a larger rule. Rules follow row/column insertions and deletions and
-are included in undo/redo. Existing values are not retroactively changed when a rule is
-applied. Input validations are session metadata: CSV/TSV has no place to store them, so
-they reset when the workbook is reopened. A workbook supports up to 256 validation
-ranges.
-For a pivot, select a source rectangle including its header row, enter the one-based
-key and value column positions relative to that selection, choose **Sum** or **Count**,
-and choose **Create pivot**. Formula results are used; groups match exact key values
-(text is case-sensitive), retain their first-seen order, and blank keys form their own
-group. **Sum** adds finite real numbers only, and **Count**
-counts nonblank values in the selected value column. The output is static data in a new
-`Pivot` sheet (or the next unused `Pivot2`, etc.), not a live link to the source. At most
-100,000 data rows and 10,000 groups can be summarized.
-Creating a pivot leaves its source sheet active. CSV/TSV saves the active sheet only;
-select the pivot sheet before saving if you want to export the summary instead. One
-Undo removes the generated pivot sheet.
-Freeze panes are kept per sheet and restored by undo/redo; the selected cell and
-the row/column headers before it stay visible while scrolling. **Unfreeze** removes
-all frozen rows and columns. Clear highlights removes conditional formatting
-from the active sheet.
-Select a range and choose **Set print area** to constrain PDF export; **Clear
-print area** restores full-sheet output. **Export PDF** prompts for an embeddable
-font and output path, applying the current print area. The CLI can also export
-with `bundle exec rukbat --export-pdf report.pdf --font /path/to/font.ttf`.
-Print areas are also session metadata and reset when the workbook is reopened.
-PDF export embeds the supplied font, resolves formatted font families from the
-system font database, and applies bold/italic along with cell formatting; bold
-and italic are synthesized in the PDF when the selected face has no matching
-variant. Charts are not yet rendered.
+Set a print area in the editor to limit PDF output, then choose **Export PDF**
+and supply an embeddable font. The command line can export directly:
+
+```sh
+rukbat --export-pdf report.pdf --font /path/to/font.ttf sales.csv
+```
+
+PDF export includes formatted, searchable cell text. Charts are not rendered
+in PDFs. Print areas reset when the workbook is reopened.
+
+## Limits
+
+- Workbooks support 1,048,576 rows and 16,384 columns; the grid renders visible cells rather than all rows at once.
+- A workbook supports up to 256 validation ranges. A pivot handles up to 100,000 data rows and 10,000 groups.
+- CSV/TSV export is limited to 10 million cells; PDF export is limited to 100,000 cells.
+- Rukbat does not open or save XLSX/ODS files. CSV/TSV does not preserve multiple sheets or workbook metadata.
 
 ## Development
 
@@ -115,6 +153,6 @@ bundle exec rbs -I sig -I "$(bundle info --path furud)/sig" -I "$(bundle info --
 gem build --strict rukbat.gemspec
 ```
 
-The implementation is not yet a `0.1.0` release. Local performance gates pass;
-check the workplan's M17 acceptance gate for remaining compatibility, public
-CI, and dependency-release checks.
+## License
+
+Rukbat is released under the [MIT License](LICENSE.txt).
