@@ -6,6 +6,7 @@
 
 <p align="center">
   <a href="https://rubygems.org/gems/rukbat"><img src="https://img.shields.io/gem/v/rukbat.svg" alt="Gem version"></a>
+  <a href="https://rubygems.org/gems/rukbat"><img src="https://img.shields.io/gem/dt/rukbat.svg" alt="Gem downloads"></a>
   <a href="https://github.com/noxdea/rukbat/actions/workflows/main.yml"><img src="https://github.com/noxdea/rukbat/actions/workflows/main.yml/badge.svg" alt="CI"></a>
   <img src="https://img.shields.io/badge/Ruby-%3E%3D%203.2-cc342d.svg" alt="Ruby 3.2 or newer">
   <a href="LICENSE.txt"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
