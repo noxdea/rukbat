@@ -10,6 +10,7 @@ module Rukbat
     MAX_FORMAT_CELLS = 100_000
     MAX_HIDDEN_CELLS = 100_000
     MAX_FILTER_ROWS = 100_000
+    MAX_PIVOT_ROWS = 100_000
     MAX_CONDITIONAL_FORMATS = 256
     MAX_INPUT_VALIDATIONS = 100_000
     FORMAT_KEYS = %i[number_format font_family font_size bold italic color background border_color border_width horizontal_alignment vertical_alignment].freeze
@@ -24,6 +25,7 @@ module Rukbat
       end
     end
     InputValidation = Data.define(:area, :minimum, :maximum)
+    PivotTable = Data.define(:source_area, :row_key_column, :value_column, :aggregate, :headers, :rows)
 
     attr_reader :active_sheet
 
@@ -286,6 +288,44 @@ module Rukbat
       Summary.new(count: values.count, numeric_count: numeric_count, sum: values.sum,
         min: values.min, max: values.max, average: numeric_count.zero? ? nil : values.sum.to_f / numeric_count,
         types: values.types)
+    end
+
+    def pivot_table(top, left, bottom, right, row_key_column:, value_column:, aggregate: :sum, sheet: @active_sheet)
+      top, left, bottom, right, name = range_coordinates(top, left, bottom, right, sheet)
+      row_key_column, value_column = strict_integer(row_key_column), strict_integer(value_column)
+      width = right - left + 1
+      raise Error, "pivot row-key column must be between 1 and #{width}" unless row_key_column.between?(1, width)
+      raise Error, "pivot value column must be between 1 and #{width}" unless value_column.between?(1, width)
+      raise Error, "pivot aggregate must be :sum or :count" unless %i[sum count].include?(aggregate)
+      raise Error, "pivot source exceeds #{MAX_PIVOT_ROWS} data rows" if bottom - top > MAX_PIVOT_ROWS
+
+      key_column, measure_column = left + row_key_column - 1, left + value_column - 1
+      groups, keys = {}, []
+      ((top + 1)..bottom).each do |row|
+        key = @engine.value(Furud::Reference.new(sheet: name, row: row, column: key_column))
+        value = @engine.value(Furud::Reference.new(sheet: name, row: row, column: measure_column))
+        unless groups.key?(key)
+          keys << key
+          groups[key] = 0
+        end
+        if aggregate == :count
+          groups[key] += 1 unless value.nil?
+        elsif value.is_a?(Numeric) && !value.is_a?(Complex)
+          groups[key] += value
+        end
+      end
+
+      key_header = @engine.value(Furud::Reference.new(sheet: name, row: top, column: key_column))
+      value_header = @engine.value(Furud::Reference.new(sheet: name, row: top, column: measure_column))
+      key_header = "Column #{row_key_column}" if key_header.nil? || key_header.to_s.empty?
+      value_header = "Column #{value_column}" if value_header.nil? || value_header.to_s.empty?
+      headers = [key_header.to_s, "#{aggregate.to_s.capitalize} of #{value_header}"].freeze
+      rows = keys.map { |key| [key, groups.fetch(key)].freeze }.freeze
+      area = Furud::Area.new(sheet: name, top: top, left: left, bottom: bottom, right: right)
+      PivotTable.new(source_area: area, row_key_column: row_key_column,
+        value_column: value_column, aggregate: aggregate, headers: headers, rows: rows)
+    rescue ArgumentError, TypeError
+      raise Error, "pivot columns must be integers"
     end
 
     def define_name(name, top, left, bottom, right, sheet: @active_sheet)

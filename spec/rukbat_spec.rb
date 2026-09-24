@@ -234,6 +234,26 @@ RSpec.describe Rukbat::Workbook do
       count: 4, numeric_count: 3, sum: 60, min: 10, max: 30, average: 20.0)
   end
 
+  it "pivots an explicit range by relative key/value columns using sum or nonblank count" do
+    workbook.set_many([[1, 1, "Region"], [1, 2, "Sales"],
+      [2, 1, "East"], [2, 2, 10], [3, 1, "West"], [3, 2, 4],
+      [4, 1, "East"], [4, 2, "=2*3"], [5, 1, "East"], [5, 2, "n/a"],
+      [6, 1, "West"]])
+
+    pivot = workbook.pivot_table(1, 1, 6, 2, row_key_column: 1, value_column: 2)
+    expect(pivot).to have_attributes(
+      source_area: Furud::Area.new(sheet: "Sheet1", top: 1, left: 1, bottom: 6, right: 2),
+      row_key_column: 1, value_column: 2, aggregate: :sum,
+      headers: ["Region", "Sum of Sales"], rows: [["East", 16], ["West", 4]])
+
+    counts = workbook.pivot_table(1, 1, 6, 2, row_key_column: 1, value_column: 2, aggregate: :count)
+    expect(counts.aggregate).to eq(:count)
+    expect(counts.headers).to eq(["Region", "Count of Sales"])
+    expect(counts.rows).to eq([["East", 3], ["West", 1]])
+    expect { workbook.pivot_table(1, 1, 6, 2, row_key_column: 3, value_column: 2) }
+      .to raise_error(Rukbat::Error, /row-key column/)
+  end
+
   it "preserves and adjusts formula references during row insertion" do
     workbook.set(5, 1, 9)
     workbook.set(1, 2, "=A5")

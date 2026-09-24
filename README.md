@@ -7,7 +7,7 @@ Furud formula engine.
 The current implementation includes a virtualized million-row grid, formula
 editing and completion, multi-sheet formulas, range summaries, undo/redo,
 structural row/column edits, formatting, sorting, filtering, duplicate removal,
-find/replace, comments, named ranges, conditional formatting, line/bar/pie,
+find/replace, comments, named ranges, conditional formatting, basic pivot tables, line/bar/pie,
 donut/scatter/area/stacked charts, CSV/TSV import/export, and searchable PDF
 export. On arm64 macOS
 with Ruby 4.0.6, the million-row integrated scroll benchmark measured 11.383 ms
@@ -79,6 +79,15 @@ selected portion of a larger rule. Rules follow row/column insertions and deleti
 are included in undo/redo. Existing values are not retroactively changed when a rule is
 applied. Input validations are session metadata: CSV/TSV has no place to store them, so
 they reset when the workbook is reopened.
+For a pivot, select a source rectangle including its header row, enter the one-based
+key and value column positions relative to that selection, choose **Sum** or **Count**,
+and choose **Create pivot**. Formula results are used; groups retain their first-seen
+order, blank keys form their own group, **Sum** adds numeric values only, and **Count**
+counts nonblank values in the selected value column. The output is static data in a new
+`Pivot` sheet (or the next unused `Pivot2`, etc.), not a live link to the source. At most
+100,000 data rows can be summarized.
+Creating a pivot leaves its source sheet active. CSV/TSV saves the active sheet only;
+select the pivot sheet before saving if you want to export the summary instead.
 Freeze panes are kept per sheet and restored by undo/redo; the selected cell and
 the row/column headers before it stay visible while scrolling. **Unfreeze** removes
 all frozen rows and columns. Clear highlights removes conditional formatting

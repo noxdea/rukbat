@@ -67,6 +67,13 @@ module Rukbat
         .on_click { apply_whole_number_validation }
       @clear_validation_button = UI::Button.new("Clear rule", size: :sm, variant: :ghost)
         .on_click { clear_input_validation }
+      @pivot_key_field = UI::TextField.new("1")
+      @pivot_value_field = UI::TextField.new("2")
+      @pivot_aggregate = :sum
+      @pivot_aggregate_dropdown = UI::Dropdown.new("Sum", items: %w[Sum Count])
+        .on_change { |value, *_| @pivot_aggregate = value.to_s.downcase.to_sym }
+      @create_pivot_button = UI::Button.new("Create pivot", size: :sm, variant: :secondary)
+        .on_click { create_pivot_table }
       @find_field = UI::TextField.new("")
       @replace_field = UI::TextField.new("")
       @find_button = UI::Button.new("Find", size: :sm, variant: :ghost).on_click { find_selection }
@@ -140,6 +147,11 @@ module Rukbat
         .child(UI::Label.new("Min", size: :sm)).child(@validation_min_field.style(width: 72))
         .child(UI::Label.new("Max", size: :sm)).child(@validation_max_field.style(width: 72))
         .child(@set_validation_button).child(@clear_validation_button)
+      pivot_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
+        .child(UI::Label.new("Pivot (selected range; first row is headers)", size: :sm))
+        .child(UI::Label.new("Key col", size: :sm)).child(@pivot_key_field.style(width: 56))
+        .child(UI::Label.new("Value col", size: :sm)).child(@pivot_value_field.style(width: 56))
+        .child(@pivot_aggregate_dropdown).child(@create_pivot_button)
       annotation_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
         .child(@highlight_button).child(@comment_field.style(width: 150)).child(@comment_button)
         .child(@name_field.style(width: 120)).child(@name_button)
@@ -169,7 +181,7 @@ module Rukbat
       content = Zaniah::Div.new.flex_col.gap(cx.theme.spacing[1]).p(cx.theme.spacing[2])
         .style(width: percent(100), height: percent(100))
         .child(toolbar).child(format_toolbar).child(data_toolbar).child(structure_toolbar).child(annotation_toolbar)
-        .child(validation_toolbar).child(find_toolbar).child(formula_row).child(@grid.flex_1)
+        .child(validation_toolbar).child(pivot_toolbar).child(find_toolbar).child(formula_row).child(@grid.flex_1)
       content.child(@chart_component) if @chart_component
       content.child(status_row)
       content
@@ -253,6 +265,36 @@ module Rukbat
       top, left, bottom, right = selected_coordinates
       @workbook.clear_input_validation(top, left, bottom, right)
       @status = "Input rule cleared from #{cell_address(top, left)}:#{cell_address(bottom, right)}"
+      request_frame
+      true
+    rescue Rukbat::Error, ArgumentError, TypeError => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def create_pivot_table
+      top, left, bottom, right = selected_coordinates
+      source_sheet, source_cell = @workbook.active_sheet, @active_cell
+      pivot = @workbook.pivot_table(top, left, bottom, right,
+        row_key_column: Integer(@pivot_key_field.value, 10),
+        value_column: Integer(@pivot_value_field.value, 10), aggregate: @pivot_aggregate)
+      name = next_pivot_sheet_name
+      @workbook.add_sheet(name)
+      changes = pivot.headers.each_with_index.map do |header, offset|
+        [1, offset + 1, pivot_cell_input(header)]
+      end
+      pivot.rows.each_with_index do |(key, value), row_offset|
+        changes << [row_offset + 2, 1, pivot_cell_input(key)]
+        changes << [row_offset + 2, 2, value]
+      end
+      @workbook.set_many(changes, sheet: name)
+      @workbook.activate(source_sheet)
+      sync_grid_visibility
+      sync_frozen_panes
+      @active_cell = source_cell
+      sync_formula_field
+      @status = "Created #{name}: #{pivot.rows.length} groups (#{pivot.aggregate}); select its sheet tab to view"
       request_frame
       true
     rescue Rukbat::Error, ArgumentError, TypeError => error
@@ -878,6 +920,18 @@ module Rukbat
       sync_formula_field
       @status = "Added #{name}"
       request_frame
+    end
+
+    def next_pivot_sheet_name
+      return "Pivot" unless @workbook.sheet_names.include?("Pivot")
+
+      index = 2
+      index += 1 while @workbook.sheet_names.include?("Pivot#{index}")
+      "Pivot#{index}"
+    end
+
+    def pivot_cell_input(value)
+      value.is_a?(String) && value.start_with?("=") ? "=#{Furud::Formula.render_literal(value)}" : value
     end
 
     def save

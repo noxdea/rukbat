@@ -113,6 +113,40 @@ RSpec.describe Rukbat::GridView do
     window&.close
   end
 
+  it "creates a static pivot sheet from the selected range and supports undo" do
+    workbook = Rukbat::Workbook.from_rows([
+      ["Region", "Sales"], ["East", 10], ["West", 4], ["East", 6]
+    ])
+    view = described_class.new(workbook)
+    view.grid.selection = [area(1...5, 1...3)]
+    view.instance_variable_get(:@pivot_key_field).buffer.replace(0...1, "1")
+    view.instance_variable_get(:@pivot_value_field).buffer.replace(0...1, "2")
+
+    expect(view.__send__(:create_pivot_table)).to be(true)
+    expect(workbook.sheet_names).to eq(["Sheet1", "Pivot"])
+    expect(workbook.active_sheet).to eq("Sheet1")
+    expect(workbook.input_at(1, 1, sheet: "Pivot")).to eq("Region")
+    expect(workbook.input_at(1, 2, sheet: "Pivot")).to eq("Sum of Sales")
+    expect(workbook.input_at(2, 1, sheet: "Pivot")).to eq("East")
+    expect(workbook.input_at(2, 2, sheet: "Pivot")).to eq(16)
+    expect(workbook.input_at(3, 2, sheet: "Pivot")).to eq(4)
+
+    view.undo
+    expect(workbook.input_at(2, 1, sheet: "Pivot")).to be_nil
+    view.undo
+    expect(workbook.sheet_names).to eq(["Sheet1"])
+  end
+
+  it "keeps leading-equals pivot keys as text in the generated sheet" do
+    workbook = Rukbat::Workbook.from_rows([["Key", "Value"], ["placeholder", 3]])
+    workbook.set(2, 1, '="=Group"')
+    view = described_class.new(workbook)
+    view.grid.selection = [area(1...3, 1...3)]
+
+    expect(view.__send__(:create_pivot_table)).to be(true)
+    expect(workbook[2, 1, sheet: "Pivot"]).to eq("=Group")
+  end
+
   it "writes #REF when formula translation leaves the grid" do
     workbook = Rukbat::Workbook.new
     workbook.set(1, 2, "=A1")
