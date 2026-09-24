@@ -318,6 +318,75 @@ RSpec.describe Rukbat::Workbook do
     expect(workbook[1, 2]).to be_nil
   end
 
+  it "applies rectangular whole-number rules and replaces or clears only selected cells" do
+    workbook.set_whole_number_validation(1, 1, 4, 4, minimum: 1, maximum: 9)
+    workbook.set_whole_number_validation(2, 2, 3, 3, minimum: 10, maximum: 20)
+
+    expect(workbook.input_validation_at(1, 1).minimum).to eq(1)
+    expect(workbook.input_validation_at(2, 2).minimum).to eq(10)
+    expect(workbook.input_validation_at(3, 3).maximum).to eq(20)
+
+    workbook.clear_input_validation(2, 2, 2, 2)
+
+    expect(workbook.input_validation_at(2, 2)).to be_nil
+    expect(workbook.input_validation_at(2, 3).minimum).to eq(10)
+    expect(workbook.input_validation_at(4, 4).maximum).to eq(9)
+  end
+
+  it "enforces validation atomically for direct edits, batches, and formula results" do
+    workbook.set_whole_number_validation(1, 2, 1, 2, minimum: 1, maximum: 10)
+    workbook.set(1, 2, 10)
+
+    expect { workbook.set(1, 2, 11) }.to raise_error(Rukbat::Error, /B1.*1 and 10/)
+    expect { workbook.set(1, 2, "text") }.to raise_error(Rukbat::Error, /B1.*whole number/)
+    expect { workbook.set(1, 2, 1.5) }.to raise_error(Rukbat::Error, /B1.*whole number/)
+    expect { workbook.set_many([[2, 1, 8], [1, 2, 12]]) }
+      .to raise_error(Rukbat::Error, /B1.*1 and 10/)
+    expect(workbook.input_at(2, 1)).to be_nil
+
+    workbook.set(1, 1, 5)
+    workbook.set(1, 2, "=A1")
+    expect(workbook[1, 2]).to eq(5)
+    expect { workbook.set(1, 1, 12) }.to raise_error(Rukbat::Error, /B1.*1 and 10/)
+    expect(workbook.input_at(1, 1)).to eq(5)
+    expect(workbook[1, 2]).to eq(5)
+    expect { workbook.set(1, 2, "=11") }.to raise_error(Rukbat::Error, /B1.*1 and 10/)
+  end
+
+  it "keeps validation ranges through undo, redo, and structural edits" do
+    workbook.set_whole_number_validation(2, 1, 3, 2, minimum: -2, maximum: 2)
+
+    expect(workbook.undo).to be(true)
+    expect(workbook.input_validation_at(2, 1)).to be_nil
+    expect(workbook.redo).to be(true)
+    expect(workbook.input_validation_at(3, 2).minimum).to eq(-2)
+
+    workbook.insert_rows(1)
+    expect(workbook.input_validation_at(2, 1)).to be_nil
+    expect(workbook.input_validation_at(3, 1).maximum).to eq(2)
+    expect(workbook.undo).to be(true)
+    expect(workbook.input_validation_at(2, 1).minimum).to eq(-2)
+  end
+
+  it "preserves redo and rolls back structure edits that violate formula validation" do
+    workbook.set_whole_number_validation(1, 2, 1, 2, minimum: 1, maximum: 9)
+    workbook.set(1, 2, 5)
+    workbook.set(1, 2, 6)
+    expect(workbook.undo).to be(true)
+    expect { workbook.set(1, 2, 10) }.to raise_error(Rukbat::Error, /B1.*1 and 9/)
+    expect(workbook.redo).to be(true)
+    expect(workbook.input_at(1, 2)).to eq(6)
+
+    workbook.set(1, 1, 5)
+    workbook.set(2, 2, "=A1")
+    workbook.set_whole_number_validation(2, 2, 2, 2, minimum: 1, maximum: 9)
+    expect { workbook.delete_rows(1) }.to raise_error(Rukbat::Error, /B1.*whole number/)
+    expect(workbook.formula(2, 2)).to eq("=A1")
+    expect(workbook.input_validation_at(2, 2).minimum).to eq(1)
+    expect(workbook.undo).to be(true)
+    expect(workbook.formula(2, 2)).to eq("=A1")
+  end
+
   it "validates sheet names and spreadsheet coordinates" do
     expect { workbook.add_sheet("Bad/Name") }.to raise_error(Rukbat::Error)
     expect { workbook.set(0, 1, 1) }.to raise_error(Rukbat::Error)

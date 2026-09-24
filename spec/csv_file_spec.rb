@@ -29,4 +29,18 @@ RSpec.describe Rukbat::CSVFile do
       expect(File.exist?(path)).to be(false)
     end
   end
+
+  it "persists validated values but not session-only input rules in CSV" do
+    Dir.mktmpdir do |directory|
+      path = File.join(directory, "validated.csv")
+      workbook = Rukbat::Workbook.new
+      workbook.set_whole_number_validation(1, 1, 1, 1, minimum: 1, maximum: 9)
+      workbook.set(1, 1, 5)
+      described_class.write(workbook, path)
+
+      reopened = described_class.read(path)
+      expect(reopened.input_at(1, 1)).to eq(5)
+      expect(reopened.input_validation_at(1, 1)).to be_nil
+    end
+  end
 end

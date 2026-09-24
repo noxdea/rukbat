@@ -6,7 +6,7 @@ module Rukbat
     MAX_FILL_CELLS = 100_000
 
     attr_reader :grid, :formula_field, :active_cell, :status, :completion_session,
-      :completion_candidate
+      :completion_candidate, :validation_min_field, :validation_max_field
 
     def initialize(workbook, on_save: nil)
       super()
@@ -61,6 +61,12 @@ module Rukbat
       @set_print_area_button = UI::Button.new("Set print area", size: :sm, variant: :ghost).on_click { set_print_area }
       @clear_print_area_button = UI::Button.new("Clear print area", size: :sm, variant: :ghost).on_click { clear_print_area }
       @export_pdf_button = UI::Button.new("Export PDF", size: :sm, variant: :ghost).on_click { export_pdf }
+      @validation_min_field = UI::TextField.new("")
+      @validation_max_field = UI::TextField.new("")
+      @set_validation_button = UI::Button.new("Apply whole-number rule", size: :sm, variant: :ghost)
+        .on_click { apply_whole_number_validation }
+      @clear_validation_button = UI::Button.new("Clear rule", size: :sm, variant: :ghost)
+        .on_click { clear_input_validation }
       @find_field = UI::TextField.new("")
       @replace_field = UI::TextField.new("")
       @find_button = UI::Button.new("Find", size: :sm, variant: :ghost).on_click { find_selection }
@@ -129,6 +135,11 @@ module Rukbat
         .child(@insert_row_button).child(@delete_rows_button)
         .child(@insert_column_button).child(@delete_columns_button)
         .child(@set_print_area_button).child(@clear_print_area_button).child(@export_pdf_button)
+      validation_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
+        .child(UI::Label.new("Whole numbers", size: :sm))
+        .child(UI::Label.new("Min", size: :sm)).child(@validation_min_field.style(width: 72))
+        .child(UI::Label.new("Max", size: :sm)).child(@validation_max_field.style(width: 72))
+        .child(@set_validation_button).child(@clear_validation_button)
       annotation_toolbar = Zaniah::Div.new.flex_row.items_center.gap(cx.theme.spacing[1])
         .child(@highlight_button).child(@comment_field.style(width: 150)).child(@comment_button)
         .child(@name_field.style(width: 120)).child(@name_button)
@@ -158,7 +169,7 @@ module Rukbat
       content = Zaniah::Div.new.flex_col.gap(cx.theme.spacing[1]).p(cx.theme.spacing[2])
         .style(width: percent(100), height: percent(100))
         .child(toolbar).child(format_toolbar).child(data_toolbar).child(structure_toolbar).child(annotation_toolbar)
-        .child(find_toolbar).child(formula_row).child(@grid.flex_1)
+        .child(validation_toolbar).child(find_toolbar).child(formula_row).child(@grid.flex_1)
       content.child(@chart_component) if @chart_component
       content.child(status_row)
       content
@@ -222,6 +233,33 @@ module Rukbat
     end
 
     private
+
+    def apply_whole_number_validation
+      top, left, bottom, right = selected_coordinates
+      minimum = Integer(@validation_min_field.value, 10)
+      maximum = Integer(@validation_max_field.value, 10)
+      @workbook.set_whole_number_validation(top, left, bottom, right,
+        minimum: minimum, maximum: maximum)
+      @status = "Whole-number rule applied to #{cell_address(top, left)}:#{cell_address(bottom, right)}"
+      request_frame
+      true
+    rescue Rukbat::Error, ArgumentError, TypeError => error
+      @status = error.message
+      request_frame
+      false
+    end
+
+    def clear_input_validation
+      top, left, bottom, right = selected_coordinates
+      @workbook.clear_input_validation(top, left, bottom, right)
+      @status = "Input rule cleared from #{cell_address(top, left)}:#{cell_address(bottom, right)}"
+      request_frame
+      true
+    rescue Rukbat::Error, ArgumentError, TypeError => error
+      @status = error.message
+      request_frame
+      false
+    end
 
     def sort_selection
       clear_filter

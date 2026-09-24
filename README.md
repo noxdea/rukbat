@@ -71,6 +71,14 @@ The toolbar provides common number, font, alignment, fill, and border formats;
 sorting, filtering, duplicate removal, search/replace, comments, named ranges,
 positive-value highlighting, freeze/unfreeze panes, print areas, and line, bar,
 pie, donut, scatter, area, stacked-area, and stacked-bar charts.
+Select a range, enter inclusive minimum/maximum values, and choose **Apply whole-number rule**
+to require each nonblank edited value (including a formula's calculated result) to be
+a whole number in that range. Invalid edits are rejected atomically; clearing cells is
+allowed. **Clear rule** removes validation from the selected range, including only the
+selected portion of a larger rule. Rules follow row/column insertions and deletions and
+are included in undo/redo. Existing values are not retroactively changed when a rule is
+applied. Input validations are session metadata: CSV/TSV has no place to store them, so
+they reset when the workbook is reopened.
 Freeze panes are kept per sheet and restored by undo/redo; the selected cell and
 the row/column headers before it stay visible while scrolling. **Unfreeze** removes
 all frozen rows and columns. Clear highlights removes conditional formatting
@@ -79,8 +87,7 @@ Select a range and choose **Set print area** to constrain PDF export; **Clear
 print area** restores full-sheet output. **Export PDF** prompts for an embeddable
 font and output path, applying the current print area. The CLI can also export
 with `bundle exec rukbat --export-pdf report.pdf --font /path/to/font.ttf`.
-Print areas are session metadata; CSV has no place to store them, so they reset
-when the workbook is reopened.
+Print areas are also session metadata and reset when the workbook is reopened.
 PDF export embeds the supplied font, resolves formatted font families from the
 system font database, and applies bold/italic along with cell formatting; bold
 and italic are synthesized in the PDF when the selected face has no matching

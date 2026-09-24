@@ -11,6 +11,7 @@ module Rukbat
     MAX_HIDDEN_CELLS = 100_000
     MAX_FILTER_ROWS = 100_000
     MAX_CONDITIONAL_FORMATS = 256
+    MAX_INPUT_VALIDATIONS = 100_000
     FORMAT_KEYS = %i[number_format font_family font_size bold italic color background border_color border_width horizontal_alignment vertical_alignment].freeze
     CONDITIONAL_OPERATORS = %i[greater_than greater_than_or_equal less_than less_than_or_equal equal not_equal contains].freeze
     COLORS = {black: "#000000", blue: "#0000FF", cyan: "#00FFFF", green: "#008000",
@@ -22,6 +23,7 @@ module Rukbat
         row.between?(top, bottom) && column.between?(left, right)
       end
     end
+    InputValidation = Data.define(:area, :minimum, :maximum)
 
     attr_reader :active_sheet
 
@@ -46,6 +48,7 @@ module Rukbat
       @hidden_columns = {}.freeze
       @frozen_panes = {name => {rows: 1, columns: 1}.freeze}.freeze
       @print_areas = {}.freeze
+      @input_validations = [].freeze
       @change_observers = []
       @source = CellSource.new(self)
       @engine = Furud::Engine.new(@source)
@@ -100,6 +103,7 @@ module Rukbat
       @formats = @formats.reject { |(sheet_name, _row, _column), _style| sheet_name == name }.freeze
       @comments = @comments.reject { |(sheet_name, _row, _column), _text| sheet_name == name }.freeze
       @conditional_formats = @conditional_formats.reject { |rule| rule[:area].sheet == name }.freeze
+      @input_validations = @input_validations.reject { |rule| rule.area.sheet == name }.freeze
       @hidden_rows = @hidden_rows.reject { |sheet_name, _| sheet_name == name }.freeze
       @hidden_columns = @hidden_columns.reject { |sheet_name, _| sheet_name == name }.freeze
       @frozen_panes = @frozen_panes.reject { |sheet_name, _| sheet_name == name }.freeze
@@ -129,15 +133,26 @@ module Rukbat
     def set(row, column, value, sheet: @active_sheet)
       ref = reference(row, column, sheet)
       current = input_at(row, column, sheet: ref.sheet)
-      return self if current == value
       return clear(row, column, sheet: ref.sheet) if value.nil?
 
       validate_formula(value, ref)
+      if current == value
+        validate_input_values!([ref])
+        return self
+      end
+
       updated = update_sheet(@sheets.fetch(ref.sheet), [[row - 1, column - 1, value]])
-      record_history
       @engine.set(ref, value)
+      changed = @engine.recalculate
+      begin
+        validate_input_values!([ref, *changed])
+      rescue Error
+        rebuild_engine
+        raise
+      end
+      record_history
       @sheets[ref.sheet] = updated
-      update_calculated(@engine.recalculate)
+      update_calculated(changed)
       notify_cells_changed(ref.sheet, [[ref.row, ref.column].freeze])
       self
     end
@@ -158,12 +173,14 @@ module Rukbat
         validate_formula(value, cell)
         [[row, column, value], cell, value] if current[row - 1, column - 1] != value
       end
-      return self if changes_to_apply.empty?
+      if changes_to_apply.empty?
+        validate_input_values!(values.values.map(&:first))
+        return self
+      end
 
       updated = update_sheet(current, changes_to_apply.map do |(row, column, value), _cell, _input|
         [row - 1, column - 1, value]
       end)
-      record_history
       changes_to_apply.each do |_change, cell, value|
         if value.nil?
           @engine.clear(cell)
@@ -171,8 +188,16 @@ module Rukbat
           @engine.set(cell, value)
         end
       end
+      changed = @engine.recalculate
+      begin
+        validate_input_values!([*changes_to_apply.map { |_change, cell, _value| cell }, *changed])
+      rescue Error
+        rebuild_engine
+        raise
+      end
+      record_history
       @sheets[ref.sheet] = updated
-      update_calculated(@engine.recalculate)
+      update_calculated(changed)
       notify_cells_changed(ref.sheet, changes_to_apply.map do |_change, cell, _value|
         [cell.row, cell.column].freeze
       end)
@@ -183,12 +208,62 @@ module Rukbat
       ref = reference(row, column, sheet)
       return self if input_at(row, column, sheet: ref.sheet).nil?
 
+      @engine.clear(ref)
+      changed = @engine.recalculate
+      begin
+        validate_input_values!([ref, *changed])
+      rescue Error
+        rebuild_engine
+        raise
+      end
       record_history
       @sheets[ref.sheet] = @sheets.fetch(ref.sheet).delete(row - 1, column - 1)
-      @engine.clear(ref)
-      update_calculated(@engine.recalculate)
+      update_calculated(changed)
       notify_cells_changed(ref.sheet, [[ref.row, ref.column].freeze])
       self
+    end
+
+    def set_whole_number_validation(top, left, bottom, right, minimum:, maximum:, sheet: @active_sheet)
+      top, left, bottom, right, name = range_coordinates(top, left, bottom, right, sheet)
+      minimum, maximum = strict_integer(minimum), strict_integer(maximum)
+      raise Error, "minimum must not exceed maximum" if minimum > maximum
+
+      area = Furud::Area.new(sheet: name, top: top, left: left, bottom: bottom, right: right)
+      validation = InputValidation.new(area: area, minimum: minimum, maximum: maximum)
+      updated = @input_validations.flat_map do |existing|
+        existing.area.sheet == name ? subtract_input_validation(existing, top, left, bottom, right) : [existing]
+      end
+      updated << validation
+      raise Error, "input validation limit exceeded" if updated.length > MAX_INPUT_VALIDATIONS
+      return self if updated == @input_validations
+
+      record_history
+      @input_validations = updated.freeze
+      self
+    rescue ArgumentError, TypeError
+      raise Error, "validation limits must be integers"
+    end
+
+    def clear_input_validation(top, left, bottom, right, sheet: @active_sheet)
+      top, left, bottom, right, name = range_coordinates(top, left, bottom, right, sheet)
+      updated = @input_validations.flat_map do |existing|
+        existing.area.sheet == name ? subtract_input_validation(existing, top, left, bottom, right) : [existing]
+      end
+      raise Error, "input validation limit exceeded" if updated.length > MAX_INPUT_VALIDATIONS
+      return self if updated == @input_validations
+
+      record_history
+      @input_validations = updated.freeze
+      self
+    end
+
+    def input_validation_at(row, column, sheet: @active_sheet)
+      ref = reference(row, column, sheet)
+      @input_validations.find do |validation|
+        area = validation.area
+        area.sheet == ref.sheet && ref.row.between?(area.top, area.bottom) &&
+          ref.column.between?(area.left, area.right)
+      end
     end
 
     def each_in(top, left, bottom, right, sheet: @active_sheet, &block)
@@ -348,7 +423,7 @@ module Rukbat
         named_ranges = named_ranges.map { |area| area.sheet == name ? adjusted_area(area, adjustment) : area }
         raise Error, "cannot delete an entire named range" if named_ranges.any?(&:nil?)
       end
-      record_history
+      previous_state = snapshot
       runs.each do |at, count|
         @engine.delete_rows(name, at, count)
         @sheets[name] = @sheets.fetch(name).delete_rows(at - 1, count)
@@ -357,7 +432,16 @@ module Rukbat
         adjust_metadata(:delete_rows, at, count, name)
       end
       sync_formula_inputs
-      update_calculated(@engine.recalculate)
+      changed = @engine.recalculate
+      begin
+        validate_input_values!(changed)
+      rescue Error
+        restore(previous_state)
+        raise
+      end
+      @history << previous_state
+      @redo.clear
+      update_calculated(changed)
       notify_cells_changed(name)
       duplicates.length
     end
@@ -635,6 +719,42 @@ module Rukbat
       raise Error, "row and column must be integers"
     end
 
+    def validate_input_values!(references)
+      references.uniq.each do |ref|
+        validation = input_validation_at(ref.row, ref.column, sheet: ref.sheet)
+        next unless validation
+
+        value = @engine.value(ref)
+        next if value.nil?
+
+        whole_number = value.is_a?(Integer) || (value.is_a?(Float) && value.finite? && value == value.to_i)
+        next if whole_number && value >= validation.minimum && value <= validation.maximum
+
+        address = "#{Furud::Formula.column_name(ref.column)}#{ref.row}"
+        raise Error, "#{address} must be a whole number between #{validation.minimum} and #{validation.maximum}"
+      end
+    end
+
+    def subtract_input_validation(validation, top, left, bottom, right)
+      area = validation.area
+      intersect_top, intersect_left = [area.top, top].max, [area.left, left].max
+      intersect_bottom, intersect_right = [area.bottom, bottom].min, [area.right, right].min
+      return [validation] if intersect_top > intersect_bottom || intersect_left > intersect_right
+
+      ranges = []
+      ranges << [area.top, area.left, intersect_top - 1, area.right] if area.top < intersect_top
+      ranges << [intersect_bottom + 1, area.left, area.bottom, area.right] if intersect_bottom < area.bottom
+      ranges << [intersect_top, area.left, intersect_bottom, intersect_left - 1] if area.left < intersect_left
+      ranges << [intersect_top, intersect_right + 1, intersect_bottom, area.right] if intersect_right < area.right
+      ranges.map do |range_top, range_left, range_bottom, range_right|
+        InputValidation.new(
+          area: Furud::Area.new(sheet: area.sheet, top: range_top, left: range_left,
+            bottom: range_bottom, right: range_right),
+          minimum: validation.minimum, maximum: validation.maximum
+        )
+      end
+    end
+
     def range_coordinates(top, left, bottom, right, name)
       top, left, bottom, right = [top, left, bottom, right].map { |value| strict_integer(value) }
       name = (name || @active_sheet).to_s
@@ -665,7 +785,7 @@ module Rukbat
       raise Error, "index is outside sheet limits" unless at.between?(1, extent)
       preflight_structural_edit(type, at, count, name, extent)
 
-      record_history
+      previous_state = snapshot
       @engine.public_send(type, name, at, count)
       denebola_at = at - 1
       current = @sheets.fetch(name)
@@ -676,7 +796,16 @@ module Rukbat
       @calculated[name] = calculated.public_send(type, denebola_at, count) if denebola_at <= calculated_extent
       adjust_metadata(type, at, count, name)
       sync_formula_inputs
-      update_calculated(@engine.recalculate)
+      changed = @engine.recalculate
+      begin
+        validate_input_values!(changed)
+      rescue Error
+        restore(previous_state)
+        raise
+      end
+      @history << previous_state
+      @redo.clear
+      update_calculated(changed)
       notify_cells_changed(name)
       self
     rescue ArgumentError, TypeError
@@ -709,10 +838,12 @@ module Rukbat
     end
 
     def snapshot = [@sheets.dup, @active_sheet, @names.dup, @formats.dup, @comments.dup,
-      @conditional_formats.dup, @hidden_rows.dup, @hidden_columns.dup, @frozen_panes.dup, @print_areas.dup]
+      @conditional_formats.dup, @hidden_rows.dup, @hidden_columns.dup, @frozen_panes.dup, @print_areas.dup,
+      @input_validations.dup]
 
     def restore(state)
-      @sheets, @active_sheet, @names, @formats, @comments, @conditional_formats, @hidden_rows, @hidden_columns, @frozen_panes, @print_areas = state
+      @sheets, @active_sheet, @names, @formats, @comments, @conditional_formats, @hidden_rows,
+        @hidden_columns, @frozen_panes, @print_areas, @input_validations = state
       rebuild_engine
     end
 
@@ -817,11 +948,16 @@ module Rukbat
         next unless area.sheet == name
         type.to_s.end_with?("rows") ? area.bottom : area.right
       end.max || 0
+      validation_extent = @input_validations.filter_map do |rule|
+        area = rule.area
+        next unless area.sheet == name
+        type.to_s.end_with?("rows") ? area.bottom : area.right
+      end.max || 0
       print_extent = @print_areas.values.filter_map do |area|
         next unless area.sheet == name
         type.to_s.end_with?("rows") ? area.bottom : area.right
       end.max || 0
-      area_extent = [area_extent, print_extent].max
+      area_extent = [area_extent, print_extent, validation_extent].max
       hidden_extent = (type.to_s.end_with?("rows") ? @hidden_rows : @hidden_columns)
         .fetch(name, Set.new).max || 0
       panes = @frozen_panes.fetch(name, {rows: 1, columns: 1})
@@ -908,6 +1044,10 @@ module Rukbat
       @conditional_formats = @conditional_formats.filter_map do |rule|
         area = adjusted_area(rule[:area], operation)
         area && rule.merge(area: area).freeze
+      end.freeze
+      @input_validations = @input_validations.filter_map do |validation|
+        area = adjusted_area(validation.area, operation)
+        InputValidation.new(area: area, minimum: validation.minimum, maximum: validation.maximum) if area
       end.freeze
       @print_areas = @print_areas.filter_map do |sheet_name, area|
         adjusted = sheet_name == sheet ? adjusted_area(area, operation) : area

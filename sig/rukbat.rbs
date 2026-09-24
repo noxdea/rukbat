@@ -15,6 +15,12 @@ module Rukbat
     MAX_ROWS: Integer
     MAX_COLUMNS: Integer
 
+    class InputValidation
+      attr_reader area: Furud::Area
+      attr_reader minimum: Integer
+      attr_reader maximum: Integer
+    end
+
     class CellRange
       attr_reader top: Integer
       attr_reader left: Integer
@@ -50,6 +56,9 @@ module Rukbat
     def set: (Integer row, Integer column, untyped value, ?sheet: String) -> self
     def set_many: (Enumerable[Array[untyped]] changes, ?sheet: String) -> self
     def clear: (Integer row, Integer column, ?sheet: String) -> self
+    def set_whole_number_validation: (Integer top, Integer left, Integer bottom, Integer right, minimum: Integer, maximum: Integer, ?sheet: String) -> self
+    def clear_input_validation: (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> self
+    def input_validation_at: (Integer row, Integer column, ?sheet: String) -> InputValidation?
     def each_in: (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> Enumerator[[Furud::Reference, untyped], self]
               | (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) { (Furud::Reference reference, untyped value) -> void } -> self
     def summary: (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> Summary
@@ -100,6 +109,8 @@ module Rukbat
   end
 
   class GridView
+    attr_reader validation_min_field: untyped
+    attr_reader validation_max_field: untyped
     def initialize: (Workbook workbook, ?on_save: untyped) -> void
     def undo: () -> bool
     def redo: () -> bool

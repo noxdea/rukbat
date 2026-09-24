@@ -75,6 +75,44 @@ RSpec.describe Rukbat::GridView do
     window&.close
   end
 
+  it "applies and clears whole-number rules for the selected range" do
+    workbook = Rukbat::Workbook.new
+    view = described_class.new(workbook)
+    view.grid.selection = [area(2...4, 3...5)]
+    view.validation_min_field.buffer.replace(0...0, "2")
+    view.validation_max_field.buffer.replace(0...0, "8")
+
+    expect(view.__send__(:apply_whole_number_validation)).to be(true)
+    expect(workbook.input_validation_at(2, 3).minimum).to eq(2)
+    expect(workbook.input_validation_at(3, 4).maximum).to eq(8)
+    expect(workbook.input_validation_at(1, 3)).to be_nil
+
+    view.grid.selection = [area(2...3, 3...4)]
+    expect(view.__send__(:clear_input_validation)).to be(true)
+    expect(workbook.input_validation_at(2, 3)).to be_nil
+    expect(workbook.input_validation_at(3, 4).minimum).to eq(2)
+  end
+
+  it "keeps an invalid cell edit active and reports the validation error" do
+    workbook = Rukbat::Workbook.from_rows([[5]])
+    workbook.set_whole_number_validation(1, 1, 1, 1, minimum: 1, maximum: 9)
+    view = described_class.new(workbook)
+    window = Zaniah::Platform::Headless::Window.new(width: 800, height: 600)
+    context = Zaniah::FrameContext.new(window)
+    view.request_layout(context)
+
+    view.__send__(:begin_edit, 1, 1, context)
+    buffer = view.instance_variable_get(:@inline_buffer)
+    buffer.replace(0...buffer.bytesize, "10")
+
+    expect(view.__send__(:commit_inline_edit)).to be(false)
+    expect(view.instance_variable_get(:@editing_cell)).to eq([1, 1])
+    expect(workbook.input_at(1, 1)).to eq(5)
+    expect(view.status).to include("A1", "1 and 9")
+  ensure
+    window&.close
+  end
+
   it "writes #REF when formula translation leaves the grid" do
     workbook = Rukbat::Workbook.new
     workbook.set(1, 2, "=A1")
