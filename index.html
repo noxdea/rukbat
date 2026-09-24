@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#020617">
+    <meta name="description" content="Rukbat is a Ruby spreadsheet editor for CSV and TSV, with live formulas, sparse sheets, and a workbook API.">
+    <title>Rukbat — a spreadsheet editor built in Ruby</title>
+    <link rel="canonical" href="https://noxdea.github.io/rukbat/">
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="container header-inner">
+        <a class="brand" href="./" aria-label="Rukbat home">Rukbat<span class="brand-mark" aria-hidden="true">/</span></a>
+        <nav aria-label="Primary navigation">
+          <a href="https://github.com/noxdea/rukbat#readme">Documentation</a>
+          <a href="https://github.com/noxdea/rukbat">GitHub</a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero container" aria-labelledby="hero-title">
+        <div class="hero-copy">
+          <h1 id="hero-title">The spreadsheet, at home in Ruby.</h1>
+          <p>Open CSV and TSV files in a desktop editor or terminal. Work with live formulas and sparse sheets, or use the same workbook through Ruby.</p>
+          <div class="hero-actions">
+            <a class="button" href="#install">Get started</a>
+            <a class="quiet-link" href="https://github.com/noxdea/rukbat#quick-start">Explore the editor <span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+
+        <figure class="artifact">
+          <div class="artifact-heading"><span>sales.csv</span><span>CSV / TSV</span></div>
+          <div class="formula-line"><span>B1</span><code>=SUM(A1:A2)</code></div>
+          <table>
+            <caption>Illustrative sheet: the sum of 12 and 30 is 42</caption>
+            <thead><tr><th scope="col"></th><th scope="col">A</th><th scope="col">B</th><th scope="col">C</th></tr></thead>
+            <tbody>
+              <tr><th scope="row">1</th><td>12</td><td class="selected">42</td><td></td></tr>
+              <tr><th scope="row">2</th><td>30</td><td></td><td></td></tr>
+              <tr><th scope="row">3</th><td></td><td></td><td></td></tr>
+            </tbody>
+          </table>
+          <figcaption>An illustrative workbook, not a screenshot of the editor. Formula results update as inputs change.</figcaption>
+        </figure>
+      </section>
+
+      <section class="details container" aria-labelledby="details-title">
+        <div class="section-intro"><h2 id="details-title">Edit, calculate, keep moving.</h2><p>A focused tool for tabular work, whether you prefer a window, a terminal, or code.</p></div>
+        <div class="feature-list">
+          <div class="feature"><h3>Work in a real grid</h3><p>Edit sparse sheets with undo and redo, sorting, filtering, formatting, and charts.</p></div>
+          <div class="feature"><h3>See formulas resolve</h3><p>Use live calculations, multi-sheet references, and range summaries while editing.</p></div>
+          <div class="feature"><h3>Use the right output</h3><p>Import and export CSV or TSV, or export a searchable PDF with an embedded font.</p></div>
+        </div>
+      </section>
+
+      <section class="install" id="install" aria-labelledby="install-title">
+        <div class="container install-inner">
+          <div><h2 id="install-title">Open a sheet.</h2><p>Requires Ruby 3.2 or newer. Rukbat reads CSV and TSV, not XLSX or ODS.</p></div>
+          <div><pre><code>gem install rukbat
+rukbat sales.csv</code></pre><a class="quiet-link" href="https://github.com/noxdea/rukbat#workbook-api">Read the workbook API <span aria-hidden="true">↗</span></a></div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer"><div class="container footer-inner"><span>Rukbat · A Ruby gem by Yudai Takada</span><a href="https://rubygems.org/gems/rukbat">RubyGems <span aria-hidden="true">↗</span></a></div></footer>
+  </body>
+</html>
