@@ -132,8 +132,6 @@ RSpec.describe Rukbat::GridView do
     expect(workbook.input_at(3, 2, sheet: "Pivot")).to eq(4)
 
     view.undo
-    expect(workbook.input_at(2, 1, sheet: "Pivot")).to be_nil
-    view.undo
     expect(workbook.sheet_names).to eq(["Sheet1"])
   end
 
@@ -145,6 +143,18 @@ RSpec.describe Rukbat::GridView do
 
     expect(view.__send__(:create_pivot_table)).to be(true)
     expect(workbook[2, 1, sheet: "Pivot"]).to eq("=Group")
+  end
+
+  it "keeps pivot output as a static snapshot after source cells change" do
+    workbook = Rukbat::Workbook.from_rows([["Key", "Value"], ["A", 3]])
+    view = described_class.new(workbook)
+    view.grid.selection = [area(1...3, 1...3)]
+
+    expect(view.__send__(:create_pivot_table)).to be(true)
+    workbook.set(2, 2, 99)
+
+    expect(workbook[2, 2, sheet: "Pivot"]).to eq(3)
+    expect(workbook[2, 2, sheet: "Sheet1"]).to eq(99)
   end
 
   it "writes #REF when formula translation leaves the grid" do

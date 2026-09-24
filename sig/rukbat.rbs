@@ -14,7 +14,9 @@ module Rukbat
   class Workbook
     MAX_ROWS: Integer
     MAX_COLUMNS: Integer
+    MAX_INPUT_VALIDATIONS: Integer
     MAX_PIVOT_ROWS: Integer
+    MAX_PIVOT_GROUPS: Integer
 
     class InputValidation
       attr_reader area: Furud::Area
@@ -73,6 +75,7 @@ module Rukbat
               | (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) { (Furud::Reference reference, untyped value) -> void } -> self
     def summary: (Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> Summary
     def pivot_table: (Integer top, Integer left, Integer bottom, Integer right, row_key_column: Integer, value_column: Integer, ?aggregate: :sum | :count, ?sheet: String) -> PivotTable
+    def add_pivot_sheet: (String name, PivotTable pivot) -> String
     def define_name: (String name, Integer top, Integer left, Integer bottom, Integer right, ?sheet: String) -> Furud::Area
     def find: (String query, ?top: Integer, ?left: Integer, ?bottom: Integer, ?right: Integer, ?sheet: String) -> Array[Furud::Reference]
     def filter_rows: (Integer top, Integer bottom, by: Integer, query: String, ?sheet: String) -> Array[Integer]

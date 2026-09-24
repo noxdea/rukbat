@@ -78,16 +78,19 @@ allowed. **Clear rule** removes validation from the selected range, including on
 selected portion of a larger rule. Rules follow row/column insertions and deletions and
 are included in undo/redo. Existing values are not retroactively changed when a rule is
 applied. Input validations are session metadata: CSV/TSV has no place to store them, so
-they reset when the workbook is reopened.
+they reset when the workbook is reopened. A workbook supports up to 256 validation
+ranges.
 For a pivot, select a source rectangle including its header row, enter the one-based
 key and value column positions relative to that selection, choose **Sum** or **Count**,
-and choose **Create pivot**. Formula results are used; groups retain their first-seen
-order, blank keys form their own group, **Sum** adds numeric values only, and **Count**
+and choose **Create pivot**. Formula results are used; groups match exact key values
+(text is case-sensitive), retain their first-seen order, and blank keys form their own
+group. **Sum** adds finite real numbers only, and **Count**
 counts nonblank values in the selected value column. The output is static data in a new
 `Pivot` sheet (or the next unused `Pivot2`, etc.), not a live link to the source. At most
-100,000 data rows can be summarized.
+100,000 data rows and 10,000 groups can be summarized.
 Creating a pivot leaves its source sheet active. CSV/TSV saves the active sheet only;
-select the pivot sheet before saving if you want to export the summary instead.
+select the pivot sheet before saving if you want to export the summary instead. One
+Undo removes the generated pivot sheet.
 Freeze panes are kept per sheet and restored by undo/redo; the selected cell and
 the row/column headers before it stay visible while scrolling. **Unfreeze** removes
 all frozen rows and columns. Clear highlights removes conditional formatting

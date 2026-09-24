@@ -275,21 +275,11 @@ module Rukbat
 
     def create_pivot_table
       top, left, bottom, right = selected_coordinates
-      source_sheet, source_cell = @workbook.active_sheet, @active_cell
+      source_cell = @active_cell
       pivot = @workbook.pivot_table(top, left, bottom, right,
         row_key_column: Integer(@pivot_key_field.value, 10),
         value_column: Integer(@pivot_value_field.value, 10), aggregate: @pivot_aggregate)
-      name = next_pivot_sheet_name
-      @workbook.add_sheet(name)
-      changes = pivot.headers.each_with_index.map do |header, offset|
-        [1, offset + 1, pivot_cell_input(header)]
-      end
-      pivot.rows.each_with_index do |(key, value), row_offset|
-        changes << [row_offset + 2, 1, pivot_cell_input(key)]
-        changes << [row_offset + 2, 2, value]
-      end
-      @workbook.set_many(changes, sheet: name)
-      @workbook.activate(source_sheet)
+      name = @workbook.add_pivot_sheet(next_pivot_sheet_name, pivot)
       sync_grid_visibility
       sync_frozen_panes
       @active_cell = source_cell
@@ -928,10 +918,6 @@ module Rukbat
       index = 2
       index += 1 while @workbook.sheet_names.include?("Pivot#{index}")
       "Pivot#{index}"
-    end
-
-    def pivot_cell_input(value)
-      value.is_a?(String) && value.start_with?("=") ? "=#{Furud::Formula.render_literal(value)}" : value
     end
 
     def save

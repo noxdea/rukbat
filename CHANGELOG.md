@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.0 — 2026-09-24
+
+- Add range-based whole-number input validation with undo support.
+- Add static pivot tables with sum and count aggregation.
+
 ## 0.2.0 — 2026-09-24
 
 - Add donut, scatter, area, stacked-area, and stacked-bar chart options.

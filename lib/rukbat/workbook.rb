@@ -11,8 +11,9 @@ module Rukbat
     MAX_HIDDEN_CELLS = 100_000
     MAX_FILTER_ROWS = 100_000
     MAX_PIVOT_ROWS = 100_000
+    MAX_PIVOT_GROUPS = 10_000
     MAX_CONDITIONAL_FORMATS = 256
-    MAX_INPUT_VALIDATIONS = 100_000
+    MAX_INPUT_VALIDATIONS = 256
     FORMAT_KEYS = %i[number_format font_family font_size bold italic color background border_color border_width horizontal_alignment vertical_alignment].freeze
     CONDITIONAL_OPERATORS = %i[greater_than greater_than_or_equal less_than less_than_or_equal equal not_equal contains].freeze
     COLORS = {black: "#000000", blue: "#0000FF", cyan: "#00FFFF", green: "#008000",
@@ -305,13 +306,18 @@ module Rukbat
         key = @engine.value(Furud::Reference.new(sheet: name, row: row, column: key_column))
         value = @engine.value(Furud::Reference.new(sheet: name, row: row, column: measure_column))
         unless groups.key?(key)
-          keys << key
+          raise Error, "pivot exceeds #{MAX_PIVOT_GROUPS} groups" if groups.length >= MAX_PIVOT_GROUPS
+
+          keys << (key.is_a?(String) ? key.dup.freeze : key)
           groups[key] = 0
         end
         if aggregate == :count
           groups[key] += 1 unless value.nil?
-        elsif value.is_a?(Numeric) && !value.is_a?(Complex)
-          groups[key] += value
+        elsif finite_pivot_number?(value)
+          sum = groups[key] + value
+          raise Error, "pivot sum is not finite" unless finite_pivot_number?(sum)
+
+          groups[key] = sum
         end
       end
 
@@ -326,6 +332,61 @@ module Rukbat
         value_column: value_column, aggregate: aggregate, headers: headers, rows: rows)
     rescue ArgumentError, TypeError
       raise Error, "pivot columns must be integers"
+    end
+
+    def add_pivot_sheet(name, pivot)
+      name = validate_name(name)
+      raise Error, "sheet already exists: #{name}" if @sheets.key?(name)
+      raise Error, "pivot must be a PivotTable" unless pivot.is_a?(PivotTable)
+      raise Error, "pivot source area is invalid" unless pivot.source_area.is_a?(Furud::Area)
+      raise Error, "unknown pivot source sheet: #{pivot.source_area.sheet}" unless @sheets.key?(pivot.source_area.sheet)
+      range_coordinates(pivot.source_area.top, pivot.source_area.left,
+        pivot.source_area.bottom, pivot.source_area.right, pivot.source_area.sheet)
+      source_width = pivot.source_area.right - pivot.source_area.left + 1
+      raise Error, "pivot columns are invalid" unless
+        pivot.row_key_column.is_a?(Integer) && pivot.row_key_column.between?(1, source_width) &&
+        pivot.value_column.is_a?(Integer) && pivot.value_column.between?(1, source_width) &&
+        %i[sum count].include?(pivot.aggregate)
+      raise Error, "pivot must have two headers and at most #{MAX_PIVOT_GROUPS} groups" unless
+        pivot.headers.is_a?(Array) && pivot.headers.length == 2 && pivot.rows.is_a?(Array) &&
+        pivot.rows.length <= MAX_PIVOT_GROUPS
+
+      rows = pivot.rows.each_with_index.map do |row, index|
+        raise Error, "pivot row #{index + 1} must contain a key and value" unless row.is_a?(Array) && row.length == 2
+
+        [row[0], row[1]]
+      end
+      changes = pivot.headers.each_with_index.map { |value, column| [1, column + 1, value] }
+      rows.each_with_index do |(key, value), index|
+        changes << [index + 2, 1, key]
+        changes << [index + 2, 2, value]
+      end
+      prepared = changes.map do |row, column, value|
+        row, column = strict_integer(row), strict_integer(column)
+        raise Error, "pivot output exceeds sheet limits" unless row.between?(1, MAX_ROWS) && column.between?(1, MAX_COLUMNS)
+
+        ref = Furud::Reference.new(sheet: name, row: row, column: column)
+        input = pivot_cell_input(value)
+        validate_formula(input, ref)
+        [row - 1, column - 1, input, ref]
+      end
+      updated = update_sheet(Denebola::Sheet.new, prepared.map { |row, column, value, _ref| [row, column, value] })
+      previous_state = snapshot
+      begin
+        @sheets = @sheets.merge(name => updated)
+        @calculated = @calculated.merge(name => Denebola::Sheet.new)
+        @frozen_panes = @frozen_panes.merge(name => {rows: 1, columns: 1}.freeze).freeze
+        prepared.each { |_row, _column, value, ref| @engine.set(ref, value) unless value.nil? }
+        changed = @engine.recalculate
+      rescue StandardError => error
+        restore(previous_state)
+        raise Error, "could not create pivot sheet: #{error.message}"
+      end
+      @history << previous_state
+      @redo.clear
+      update_calculated(changed)
+      notify_cells_changed(nil)
+      name
     end
 
     def define_name(name, top, left, bottom, right, sheet: @active_sheet)
@@ -773,6 +834,27 @@ module Rukbat
         address = "#{Furud::Formula.column_name(ref.column)}#{ref.row}"
         raise Error, "#{address} must be a whole number between #{validation.minimum} and #{validation.maximum}"
       end
+    end
+
+    def finite_pivot_number?(value)
+      value.is_a?(Numeric) && !value.is_a?(Complex) && (!value.respond_to?(:finite?) || value.finite?)
+    end
+
+    def pivot_cell_input(value)
+      case value
+      when String
+        value.start_with?("=") ? "=#{Furud::Formula.render_literal(value)}" : value
+      when Float
+        value.finite? ? value : value.to_s
+      when Complex
+        value.to_s
+      when NilClass, TrueClass, FalseClass, Numeric, Furud::ErrorValue
+        value
+      else
+        value.to_s
+      end
+    rescue StandardError => error
+      raise Error, "pivot value cannot be written: #{error.message}"
     end
 
     def subtract_input_validation(validation, top, left, bottom, right)
