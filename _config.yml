@@ -1,0 +1,43 @@
+title: Rukbat
+description: Ruby spreadsheet editor with sparse sheets, live formulas, and CSV/TSV workflows.
+url: https://noxdea.github.io
+baseurl: /rukbat
+repository: noxdea/rukbat
+markdown: kramdown
+plugins:
+  - jekyll-relative-links
+kramdown:
+  input: GFM
+defaults:
+  - scope:
+      path: docs
+    values:
+      layout: guide
+guide:
+  - title: Getting started
+    url: /docs/
+  - title: Using the editor
+    url: /docs/usage.html
+  - title: Formulas and references
+    url: /docs/formulas.html
+  - title: Files, exports, and limits
+    url: /docs/files.html
+  - title: Workbook API
+    url: /docs/workbook-api.html
+  - title: Development
+    url: /docs/development.html
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - Rakefile
+  - rukbat.gemspec
+  - README.md
+  - CHANGELOG.md
+  - LICENSE.txt
+  - bench
+  - exe
+  - lib
+  - sig
+  - spec
+  - tools
+  - tmp

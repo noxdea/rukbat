@@ -4,8 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="theme-color" content="#020617">
-    <meta name="description" content="Rukbat is a Ruby spreadsheet editor for CSV and TSV, with live formulas, sparse sheets, and a workbook API.">
-    <title>Rukbat — a spreadsheet editor built in Ruby</title>
+    <meta name="description" content="Rukbat is a Ruby spreadsheet editor for CSV and TSV, with live formulas, sparse sheets, charts, and a workbook API.">
+    <meta property="og:title" content="Rukbat — The spreadsheet, at home in Ruby">
+    <meta property="og:description" content="Open a CSV, calculate with live formulas, and work in a desktop editor, terminal, or Ruby script.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://noxdea.github.io/rukbat/">
+    <meta property="og:image" content="https://noxdea.github.io/rukbat/docs/media/overview.png">
+    <title>Rukbat — The spreadsheet, at home in Ruby</title>
     <link rel="canonical" href="https://noxdea.github.io/rukbat/">
     <link rel="stylesheet" href="styles.css">
   </head>
@@ -15,7 +20,9 @@
       <div class="container header-inner">
         <a class="brand" href="./" aria-label="Rukbat home">Rukbat<span class="brand-mark" aria-hidden="true">/</span></a>
         <nav aria-label="Primary navigation">
-          <a href="https://github.com/noxdea/rukbat#readme">Documentation</a>
+          <a href="#features">Features</a>
+          <a href="#quick-start">Quick start</a>
+          <a href="docs/">User guide</a>
           <a href="https://github.com/noxdea/rukbat">GitHub</a>
         </nav>
       </div>
@@ -24,48 +31,90 @@
     <main id="main">
       <section class="hero container" aria-labelledby="hero-title">
         <div class="hero-copy">
-          <h1 id="hero-title">The spreadsheet, at home in Ruby.</h1>
-          <p>Open CSV and TSV files in a desktop editor or terminal. Work with live formulas and sparse sheets, or use the same workbook through Ruby.</p>
+          <h1 id="hero-title">The spreadsheet,<br>at home in Ruby.</h1>
+          <p>Open a CSV, work with live formulas, and turn your data into a chart or summary. Use the desktop editor, an interactive terminal, or the same workbook from Ruby.</p>
           <div class="hero-actions">
-            <a class="button" href="#install">Get started</a>
-            <a class="quiet-link" href="https://github.com/noxdea/rukbat#quick-start">Explore the editor <span aria-hidden="true">↗</span></a>
+            <a class="button" href="docs/">Read the user guide</a>
+            <a class="button secondary" href="https://rubygems.org/gems/rukbat">Install the gem</a>
           </div>
         </div>
-
-        <figure class="artifact">
-          <div class="artifact-heading"><span>sales.csv</span><span>CSV / TSV</span></div>
-          <div class="formula-line"><span>B1</span><code>=SUM(A1:A2)</code></div>
-          <table>
-            <caption>Illustrative sheet: the sum of 12 and 30 is 42</caption>
-            <thead><tr><th scope="col"></th><th scope="col">A</th><th scope="col">B</th><th scope="col">C</th></tr></thead>
-            <tbody>
-              <tr><th scope="row">1</th><td>12</td><td class="selected">42</td><td></td></tr>
-              <tr><th scope="row">2</th><td>30</td><td></td><td></td></tr>
-              <tr><th scope="row">3</th><td></td><td></td><td></td></tr>
-            </tbody>
-          </table>
-          <figcaption>An illustrative workbook, not a screenshot of the editor. Formula results update as inputs change.</figcaption>
+        <div class="install-command">
+          <p>Start with a sheet</p>
+          <pre><code>gem install rukbat
+rukbat sales.csv</code></pre>
+          <p class="requirements">Ruby 3.2 or newer. CSV and TSV input.</p>
+        </div>
+        <figure class="application-preview">
+          <a href="docs/usage.html"><img src="docs/media/overview.png" width="1440" height="860" alt="Rukbat showing quarterly sales, calculated yearly totals, formatting controls, and a bar chart." fetchpriority="high"></a>
+          <figcaption>The real Rukbat editor, rendered with example sales data.</figcaption>
         </figure>
       </section>
 
-      <section class="details container" aria-labelledby="details-title">
-        <div class="section-intro"><h2 id="details-title">Edit, calculate, keep moving.</h2><p>A focused tool for tabular work, whether you prefer a window, a terminal, or code.</p></div>
-        <div class="feature-list">
-          <div class="feature"><h3>Work in a real grid</h3><p>Edit sparse sheets with undo and redo, sorting, filtering, formatting, and charts.</p></div>
-          <div class="feature"><h3>See formulas resolve</h3><p>Use live calculations, multi-sheet references, and range summaries while editing.</p></div>
-          <div class="feature"><h3>Use the right output</h3><p>Import and export CSV or TSV, or export a searchable PDF with an embedded font.</p></div>
+      <div class="capabilities">
+        <dl class="container capability-list">
+          <div><dt>Desktop and terminal</dt><dd>One editor, selected for your environment</dd></div>
+          <div><dt>Live formulas</dt><dd>Cell, range, and multi-sheet references</dd></div>
+          <div><dt>CSV / TSV / PDF</dt><dd>Tabular files and searchable documents</dd></div>
+          <div><dt>Ruby API</dt><dd>Workbooks without opening a window</dd></div>
+        </dl>
+      </div>
+
+      <section id="features" class="details container" aria-labelledby="details-title">
+        <div class="section-intro">
+          <h2 id="details-title">From a file to a working sheet.</h2>
+          <p>Keep your inputs, calculations, and summaries together while you work.</p>
+        </div>
+        <dl class="feature-list">
+          <div><dt>Edit a real grid</dt><dd>Navigate sparse million-row sheets, edit in place, fill formulas, and undo or redo changes. Only visible cells are rendered.</dd></div>
+          <div><dt>See formulas resolve</dt><dd>Calculate across cells, named ranges, and sheets. Complete function names and inspect a selected range's sum and average.</dd></div>
+          <div><dt>Organize the data</dt><dd>Sort, filter, remove duplicates, and find or replace text. Insert, hide, or freeze rows and columns as you work.</dd></div>
+          <div><dt>Make values readable</dt><dd>Apply number formats, font styles, colors, and borders. Highlight positive values or set whole-number input rules.</dd></div>
+          <div><dt>Build a summary</dt><dd>Create a static Sum or Count pivot, or display line, bar, pie, donut, scatter, area, and stacked charts.</dd></div>
+          <div><dt>Choose your output</dt><dd>Save the active sheet as UTF-8 CSV or TSV, or export formatted cells to a searchable PDF with an embedded font.</dd></div>
+        </dl>
+      </section>
+
+      <section class="install" id="quick-start" aria-labelledby="install-title">
+        <div class="container install-inner">
+          <div>
+            <h2 id="install-title">Calculate your first total.</h2>
+            <p>Put <code>12</code> in A1, <code>30</code> in A2, and <code>=SUM(A1:A2)</code> in B1. Change an input and the result updates.</p>
+            <p>Save writes the active sheet's calculated values. CSV/TSV does not retain other sheets or formatting, and Rukbat does not read XLSX or ODS.</p>
+            <a class="quiet-link" href="docs/files.html">Read about files and limits</a>
+          </div>
+          <div class="commands">
+            <h3>Open a CSV or TSV</h3>
+            <pre><code>rukbat sales.csv
+rukbat data.tsv</code></pre>
+            <h3>Use the workbook from Ruby</h3>
+            <pre><code>require "rukbat"
+
+book = Rukbat::Workbook.new
+book.set(1, 1, 12)
+book.set(2, 1, 30)
+book.set(1, 2, "=SUM(A1:A2)")
+book[1, 2] # =&gt; 42</code></pre>
+            <a class="quiet-link" href="docs/workbook-api.html">Explore the workbook API</a>
+          </div>
         </div>
       </section>
 
-      <section class="install" id="install" aria-labelledby="install-title">
-        <div class="container install-inner">
-          <div><h2 id="install-title">Open a sheet.</h2><p>Requires Ruby 3.2 or newer. Rukbat reads CSV and TSV, not XLSX or ODS.</p></div>
-          <div><pre><code>gem install rukbat
-rukbat sales.csv</code></pre><a class="quiet-link" href="https://github.com/noxdea/rukbat#workbook-api">Read the workbook API <span aria-hidden="true">↗</span></a></div>
+      <section class="reading container" aria-labelledby="reading-title">
+        <h2 id="reading-title">Keep exploring.</h2>
+        <div class="reading-list">
+          <a href="docs/"><strong>Getting started</strong><span>Installation, your first formula, and saving</span></a>
+          <a href="docs/usage.html"><strong>Using the editor</strong><span>Toolbars, selection, charts, pivots, and keyboard controls</span></a>
+          <a href="docs/formulas.html"><strong>Formulas and references</strong><span>Completion, named ranges, and multiple sheets</span></a>
+          <a href="docs/files.html"><strong>Files, exports, and limits</strong><span>What a save preserves, PDF output, and troubleshooting</span></a>
         </div>
       </section>
     </main>
 
-    <footer class="site-footer"><div class="container footer-inner"><span>Rukbat · A Ruby gem by Yudai Takada</span><a href="https://rubygems.org/gems/rukbat">RubyGems <span aria-hidden="true">↗</span></a></div></footer>
+    <footer class="site-footer">
+      <div class="container footer-inner">
+        <span>Rukbat · <a href="https://github.com/noxdea/rukbat/blob/main/LICENSE.txt">MIT License</a></span>
+        <a href="https://github.com/noxdea/rukbat">Source on GitHub</a>
+      </div>
+    </footer>
   </body>
 </html>
